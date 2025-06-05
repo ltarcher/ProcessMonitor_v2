@@ -20,15 +20,104 @@ import (
 	"time"
 )
 
+// LogRotator handles log file rotation
+type LogRotator struct {
+	filename    string
+	maxSize     int64 // Maximum size in bytes
+	currentFile *os.File
+}
+
+func NewLogRotator(filename string, maxSize int64) *LogRotator {
+	return &LogRotator{
+		filename: filename,
+		maxSize:  maxSize,
+	}
+}
+
+func (lr *LogRotator) Write(p []byte) (n int, err error) {
+	// Check if we need to rotate
+	if lr.currentFile != nil {
+		if stat, err := lr.currentFile.Stat(); err == nil {
+			if stat.Size()+int64(len(p)) > lr.maxSize {
+				lr.rotate()
+			}
+		}
+	}
+
+	// Open file if not already open
+	if lr.currentFile == nil {
+		lr.currentFile, err = os.OpenFile(lr.filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	// Write to both file and console
+	n, err = lr.currentFile.Write(p)
+	if err == nil {
+		fmt.Print(string(p)) // Also print to console
+	}
+	return n, err
+}
+
+func (lr *LogRotator) rotate() {
+	if lr.currentFile != nil {
+		lr.currentFile.Close()
+		lr.currentFile = nil
+	}
+
+	// Create backup filename with timestamp
+	now := time.Now()
+	backupName := fmt.Sprintf("%s.%s", lr.filename, now.Format("2006-01-02_15-04-05"))
+	
+	// Rename current log file to backup
+	if err := os.Rename(lr.filename, backupName); err != nil {
+		logrus.Errorf("Failed to rotate log file: %v", err)
+		return
+	}
+	
+	logrus.Infof("Log file rotated to: %s", backupName)
+}
+
+func (lr *LogRotator) Close() error {
+	if lr.currentFile != nil {
+		return lr.currentFile.Close()
+	}
+	return nil
+}
+
+// MonthlyCleanup removes log files older than 1 month
+func (lr *LogRotator) MonthlyCleanup() {
+	dir := filepath.Dir(lr.filename)
+	baseName := filepath.Base(lr.filename)
+	
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		logrus.Errorf("Failed to read log directory: %v", err)
+		return
+	}
+	
+	cutoff := time.Now().AddDate(0, -1, 0) // 1 month ago
+	
+	for _, file := range files {
+		if strings.HasPrefix(file.Name(), baseName+".") && !file.IsDir() {
+			if file.ModTime().Before(cutoff) {
+				fullPath := filepath.Join(dir, file.Name())
+				if err := os.Remove(fullPath); err != nil {
+					logrus.Errorf("Failed to remove old log file %s: %v", fullPath, err)
+				} else {
+					logrus.Infof("Removed old log file: %s", fullPath)
+				}
+			}
+		}
+	}
+}
+
 // ConsoleHook sends logs to console as well as file
 type ConsoleHook struct{}
 
 func (hook *ConsoleHook) Fire(entry *logrus.Entry) error {
-	line, err := entry.String()
-	if err != nil {
-		return err
-	}
-	fmt.Print(line)
+	// This hook is no longer needed as LogRotator handles console output
 	return nil
 }
 
@@ -336,27 +425,41 @@ func main() {
 		logrus.Fatalf("Error parsing config: %v", err)
 	}
 
-	// Set up logging
-	logFile, err := os.OpenFile("processmonitor.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		logrus.Fatalf("Error opening log file: %v", err)
-	}
+	// Set up context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Set up logging with rotation (100MB limit)
+	logRotator := NewLogRotator("processmonitor.log", 100*1024*1024) // 100MB
+	defer logRotator.Close()
 	
-	logrus.SetOutput(logFile)
+	logrus.SetOutput(logRotator)
 	logrus.SetLevel(logrus.InfoLevel)
 	logrus.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
 	
-	// Also log to console
-	logrus.AddHook(&ConsoleHook{})
+	// Start monthly cleanup routine
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour) // Check daily
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-ticker.C:
+				// Check if it's the first day of the month
+				now := time.Now()
+				if now.Day() == 1 {
+					logRotator.MonthlyCleanup()
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	logrus.Infof("Starting Process Monitor v1.0")
 	logrus.Infof("Monitoring %d processes", len(config.Processes))
-
-	// Set up context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// Set up signal handling
 	sigs := make(chan os.Signal, 1)
