@@ -59,7 +59,22 @@ processes:
 ./processmonitor -create-watchdog
 ```
 
-### 4. 看门狗脚本
+### 4. Windows服务部署
+
+将监控狗注册为Windows系统服务，实现开机自启动：
+
+```bash
+# 安装为Windows服务（需要管理员权限）
+install_service.bat
+
+# 管理服务
+service_manager.bat
+
+# 卸载服务
+uninstall_service.bat
+```
+
+### 5. 看门狗脚本
 
 生成的看门狗脚本会监控监控进程本身：
 
@@ -186,13 +201,40 @@ processes:
     kill_on_exit: false   # 监控狗退出时保留应用进程
 ```
 
+## Windows服务部署
+
+### 服务安装
+```bash
+# 以管理员身份运行
+install_service.bat
+```
+
+### 服务管理
+```bash
+# 启动/停止/重启服务
+service_manager.bat
+
+# 或使用命令行
+sc start ProcessMonitor
+sc stop ProcessMonitor
+sc query ProcessMonitor
+```
+
+### 服务特性
+- **自动启动**：开机自动启动
+- **故障恢复**：服务失败时自动重启
+- **后台运行**：无需用户登录即可运行
+- **系统集成**：完全集成到Windows服务管理
+
+详细部署指南请参考：[`deploy_guide.md`](deploy_guide.md:1)
+
 ## 注意事项
 
 1. 确保监控进程有足够权限启动和终止目标进程
 2. 健康检查URL应该返回HTTP 200状态码
 3. 合理设置检查间隔，避免过于频繁的检查
-4. 建议使用看门狗脚本确保监控进程本身的可靠性
-5. 在生产环境中，建议将监控进程注册为系统服务
+4. **生产环境推荐**：使用Windows服务部署，确保高可用性
+5. **开发测试环境**：可使用看门狗脚本进行简单部署
 6. **重要**：`kill_on_exit` 参数控制监控狗退出时的行为：
    - `true`：监控狗退出时会杀死被监控的进程
    - `false`：监控狗退出时保留被监控的进程继续运行
