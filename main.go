@@ -13,10 +13,28 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 )
+
+// ConsoleHook sends logs to console as well as file
+type ConsoleHook struct{}
+
+func (hook *ConsoleHook) Fire(entry *logrus.Entry) error {
+	line, err := entry.String()
+	if err != nil {
+		return err
+	}
+	fmt.Print(line)
+	return nil
+}
+
+func (hook *ConsoleHook) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
 
 // Config represents the configuration structure
 type Config struct {
@@ -40,11 +58,12 @@ func isProcessRunning(name string) (bool, error) {
 		return false, err
 	}
 
+	processName := filepath.Base(name)
 	for _, p := range processes {
 		exe, _ := p.Exe()
 		cmdline, _ := p.Cmdline()
 		// Check both executable path and command line
-		if exe == name || cmdline == name {
+		if strings.Contains(exe, processName) || strings.Contains(cmdline, processName) {
 			return true, nil
 		}
 	}
@@ -78,7 +97,19 @@ func isHealthCheckOK(url string) bool {
 
 // startProcess starts a new process
 func startProcess(config ProcessConfig) (*exec.Cmd, error) {
-	cmd := exec.Command(config.Name, config.Args...)
+	var cmd *exec.Cmd
+	
+	// Handle relative paths by adding "./" prefix if needed
+	processName := config.Name
+	if !filepath.IsAbs(processName) && !strings.HasPrefix(processName, "./") && !strings.HasPrefix(processName, ".\\") {
+		if runtime.GOOS == "windows" {
+			processName = ".\\" + processName
+		} else {
+			processName = "./" + processName
+		}
+	}
+	
+	cmd = exec.Command(processName, config.Args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Start()
@@ -92,8 +123,9 @@ func restartProcess(config ProcessConfig) (*exec.Cmd, error) {
 	for _, p := range procs {
 		exe, _ := p.Exe()
 		cmdline, _ := p.Cmdline()
-		if exe == config.Name || cmdline == config.Name {
-			logrus.Infof("Killing existing process: %s", config.Name)
+		processName := filepath.Base(config.Name)
+		if strings.Contains(exe, processName) || strings.Contains(cmdline, processName) {
+			logrus.Infof("Killing existing process: %s (PID: %d)", config.Name, p.Pid)
 			p.Kill()
 		}
 	}
@@ -240,10 +272,19 @@ func main() {
 	}
 
 	// Set up logging
+	logFile, err := os.OpenFile("processmonitor.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		logrus.Fatalf("Error opening log file: %v", err)
+	}
+	
+	logrus.SetOutput(logFile)
 	logrus.SetLevel(logrus.InfoLevel)
 	logrus.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
+	
+	// Also log to console
+	logrus.AddHook(&ConsoleHook{})
 
 	logrus.Infof("Starting Process Monitor v1.0")
 	logrus.Infof("Monitoring %d processes", len(config.Processes))
