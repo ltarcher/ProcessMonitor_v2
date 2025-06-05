@@ -111,6 +111,14 @@ func startProcess(config ProcessConfig) (*exec.Cmd, error) {
 	}
 	
 	cmd = exec.Command(processName, config.Args...)
+	
+	// Set process attributes to prevent automatic termination when parent exits
+	if runtime.GOOS == "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		}
+	}
+	
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Start()
