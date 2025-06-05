@@ -1,5 +1,5 @@
 processes:
-  - name: "test_app.exe"
+  - name: "E:\\develop\\AI\\ProcessMonitor_v2\\test_app.exe"
     args: []
     ports: [8080]
     health_checks: ["http://localhost:8080/health"]
