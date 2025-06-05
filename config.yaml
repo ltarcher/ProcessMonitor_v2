@@ -1,0 +1,7 @@
+processes:
+  - name: "test-process"
+    args: ["-arg1", "value1"]
+    ports: [8080]
+    health_checks: ["http://localhost:8080/health"]
+    check_interval: 10
+    restart_delay: 5

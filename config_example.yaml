@@ -1,0 +1,47 @@
+# 进程监控配置示例
+processes:
+  # 示例1: 监控Web服务器
+  - name: "nginx.exe"                       # Windows下的nginx
+    args: []                                # 无额外启动参数
+    ports: [80, 443]                        # 监控80和443端口
+    health_checks:                          # HTTP健康检查
+      - "http://localhost/health"
+    check_interval: 30                      # 每30秒检查一次
+    restart_delay: 5                        # 重启前等待5秒
+
+  # 示例2: 监控自定义应用
+  - name: "./myapp.exe"                     # 相对路径的应用
+    args: ["-config", "app.conf", "-port", "8080"]  # 启动参数
+    ports: [8080]                           # 监控8080端口
+    health_checks:                          # 多个健康检查URL
+      - "http://localhost:8080/api/health"
+      - "http://localhost:8080/api/status"
+    check_interval: 15                      # 每15秒检查一次
+    restart_delay: 3                        # 重启前等待3秒
+
+  # 示例3: 监控数据库服务
+  - name: "mysqld"                          # Linux下的MySQL
+    args: []
+    ports: [3306]                           # 只监控端口，不做HTTP检查
+    health_checks: []                       # 空的健康检查列表
+    check_interval: 60                      # 每60秒检查一次
+    restart_delay: 10                       # 重启前等待10秒
+
+  # 示例4: 只监控进程存在性
+  - name: "important-service"
+    args: ["-daemon"]
+    ports: []                               # 不监控端口
+    health_checks: []                       # 不做HTTP检查
+    check_interval: 20                      # 每20秒检查一次
+    restart_delay: 5                        # 重启前等待5秒
+
+  # 示例5: 复杂的微服务监控
+  - name: "C:\\Program Files\\MyApp\\service.exe"  # 完整路径
+    args: ["-env", "production", "-log-level", "info"]
+    ports: [8080, 8081, 9090]               # 监控多个端口
+    health_checks:                          # 多种协议的健康检查
+      - "http://localhost:8080/health"
+      - "https://localhost:8081/status"
+      - "http://localhost:9090/metrics"
+    check_interval: 10                      # 频繁检查（每10秒）
+    restart_delay: 2                        # 快速重启（等待2秒）
