@@ -8,6 +8,7 @@ processes:
       - "http://localhost/health"
     check_interval: 30                      # 每30秒检查一次
     restart_delay: 5                        # 重启前等待5秒
+    kill_on_exit: true                      # 监控狗退出时杀死被监控进程
 
   # 示例2: 监控自定义应用
   - name: "./myapp.exe"                     # 相对路径的应用
@@ -18,6 +19,7 @@ processes:
       - "http://localhost:8080/api/status"
     check_interval: 15                      # 每15秒检查一次
     restart_delay: 3                        # 重启前等待3秒
+    kill_on_exit: false                     # 监控狗退出时保留被监控进程
 
   # 示例3: 监控数据库服务
   - name: "mysqld"                          # Linux下的MySQL
@@ -26,6 +28,7 @@ processes:
     health_checks: []                       # 空的健康检查列表
     check_interval: 60                      # 每60秒检查一次
     restart_delay: 10                       # 重启前等待10秒
+    kill_on_exit: false                     # 数据库服务通常不应该被杀死
 
   # 示例4: 只监控进程存在性
   - name: "important-service"
@@ -34,6 +37,7 @@ processes:
     health_checks: []                       # 不做HTTP检查
     check_interval: 20                      # 每20秒检查一次
     restart_delay: 5                        # 重启前等待5秒
+    kill_on_exit: true                      # 监控狗退出时杀死进程
 
   # 示例5: 复杂的微服务监控
   - name: "C:\\Program Files\\MyApp\\service.exe"  # 完整路径
@@ -45,3 +49,4 @@ processes:
       - "http://localhost:9090/metrics"
     check_interval: 10                      # 频繁检查（每10秒）
     restart_delay: 2                        # 快速重启（等待2秒）
+    kill_on_exit: true                      # 监控狗退出时杀死进程

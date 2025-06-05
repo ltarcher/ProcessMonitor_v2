@@ -5,3 +5,4 @@ processes:
     health_checks: ["http://localhost:8080/health"]
     check_interval: 10
     restart_delay: 5
+    kill_on_exit: false

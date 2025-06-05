@@ -49,6 +49,7 @@ type ProcessConfig struct {
 	HealthChecks  []string `yaml:"health_checks"`
 	CheckInterval int      `yaml:"check_interval"`
 	RestartDelay  int      `yaml:"restart_delay"`
+	KillOnExit    bool     `yaml:"kill_on_exit"`
 }
 
 // isProcessRunning checks if a process is running by name
@@ -258,10 +259,12 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 			}
 
 		case <-ctx.Done():
-			if currentCmd != nil && currentCmd.Process != nil {
+			if config.KillOnExit && currentCmd != nil && currentCmd.Process != nil {
 				logrus.Infof("Stopping process %s (PID: %d)", config.Name, currentCmd.Process.Pid)
 				currentCmd.Process.Kill()
 				currentCmd.Wait()
+			} else if currentCmd != nil && currentCmd.Process != nil {
+				logrus.Infof("Leaving process %s (PID: %d) running", config.Name, currentCmd.Process.Pid)
 			}
 			return
 		}

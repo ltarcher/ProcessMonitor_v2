@@ -107,6 +107,7 @@ chmod +x monitor_watchdog.sh
 | `health_checks` | []string | 否 | HTTP健康检查URL列表 |
 | `check_interval` | int | 否 | 检查间隔秒数（默认30秒） |
 | `restart_delay` | int | 否 | 重启前等待秒数（默认5秒） |
+| `kill_on_exit` | bool | 否 | 监控狗退出时是否杀死被监控进程（默认false） |
 
 ## 日志级别
 
@@ -139,6 +140,7 @@ processes:
     health_checks: ["http://localhost/health"]
     check_interval: 30
     restart_delay: 5
+    kill_on_exit: true    # 监控狗退出时杀死nginx
 ```
 
 ### 监控数据库服务
@@ -149,6 +151,7 @@ processes:
     ports: [3306]
     check_interval: 60
     restart_delay: 10
+    kill_on_exit: false   # 监控狗退出时保留数据库进程
 ```
 
 ### 监控自定义应用
@@ -161,6 +164,7 @@ processes:
     health_checks: ["http://localhost:8080/api/health"]
     check_interval: 15
     restart_delay: 3
+    kill_on_exit: false   # 监控狗退出时保留应用进程
 ```
 
 ## 注意事项
@@ -170,6 +174,10 @@ processes:
 3. 合理设置检查间隔，避免过于频繁的检查
 4. 建议使用看门狗脚本确保监控进程本身的可靠性
 5. 在生产环境中，建议将监控进程注册为系统服务
+6. **重要**：`kill_on_exit` 参数控制监控狗退出时的行为：
+   - `true`：监控狗退出时会杀死被监控的进程
+   - `false`：监控狗退出时保留被监控的进程继续运行
+   - 对于数据库等重要服务，建议设置为 `false`
 
 ## 故障排除
 
