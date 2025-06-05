@@ -116,29 +116,19 @@ func startProcess(config ProcessConfig) (*exec.Cmd, error) {
 	return cmd, err
 }
 
-// restartProcess restarts a process with delay
-func restartProcess(config ProcessConfig) (*exec.Cmd, error) {
-	// Check if process is running and kill it if necessary
+// killExistingProcesses kills any existing processes with the same name
+func killExistingProcesses(name string) {
 	procs, _ := process.Processes()
+	processName := filepath.Base(name)
+	
 	for _, p := range procs {
 		exe, _ := p.Exe()
 		cmdline, _ := p.Cmdline()
-		processName := filepath.Base(config.Name)
 		if strings.Contains(exe, processName) || strings.Contains(cmdline, processName) {
-			logrus.Infof("Killing existing process: %s (PID: %d)", config.Name, p.Pid)
+			logrus.Infof("Killing existing process: %s (PID: %d)", name, p.Pid)
 			p.Kill()
 		}
 	}
-
-	// Wait for the restart delay
-	if config.RestartDelay > 0 {
-		logrus.Infof("Waiting %d seconds before restart", config.RestartDelay)
-		time.Sleep(time.Duration(config.RestartDelay) * time.Second)
-	}
-
-	// Start the process
-	logrus.Infof("Starting process: %s", config.Name)
-	return startProcess(config)
 }
 
 // monitorProcess monitors a process and restarts it if necessary
@@ -147,6 +137,7 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 	defer ticker.Stop()
 
 	var currentCmd *exec.Cmd
+	var isRestarting bool
 
 	// Start the process initially
 	logrus.Infof("Starting initial process: %s", config.Name)
@@ -155,59 +146,122 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 		logrus.Errorf("Failed to start initial process %s: %v", config.Name, err)
 	} else {
 		currentCmd = cmd
+		// Give the process some time to start up
+		time.Sleep(2 * time.Second)
 	}
 
 	for {
 		select {
 		case <-ticker.C:
-			needRestart := false
-			
-			// Check process status
-			running, _ := isProcessRunning(config.Name)
-			if !running {
-				logrus.Warnf("Process %s is not running", config.Name)
-				needRestart = true
+			// Skip monitoring if currently restarting
+			if isRestarting {
+				logrus.Debugf("Process %s is currently restarting, skipping check", config.Name)
+				continue
 			}
+
+			needRestart := false
+			processRunning := false
 			
-			// Check ports if configured
-			if !needRestart && len(config.Ports) > 0 {
-				for _, port := range config.Ports {
-					if !isPortInUse(port) {
-						logrus.Warnf("Port %d is not in use for process %s", port, config.Name)
-						needRestart = true
-						break
-					}
+			// Check if current command is still running
+			if currentCmd != nil && currentCmd.Process != nil {
+				// Check if process is still alive using process state
+				processState := currentCmd.ProcessState
+				if processState != nil && processState.Exited() {
+					logrus.Warnf("Managed process %s (PID: %d) has exited", config.Name, currentCmd.Process.Pid)
+					needRestart = true
+				} else {
+					// Process seems to be running
+					processRunning = true
+					logrus.Debugf("Process %s (PID: %d) is running", config.Name, currentCmd.Process.Pid)
+				}
+			} else {
+				// No current command, check if process exists by name
+				running, _ := isProcessRunning(config.Name)
+				if !running {
+					logrus.Warnf("Process %s is not running", config.Name)
+					needRestart = true
+				} else {
+					processRunning = true
 				}
 			}
 			
-			// Check health checks if configured
-			if !needRestart && len(config.HealthChecks) > 0 {
-				for _, check := range config.HealthChecks {
-					if !isHealthCheckOK(check) {
-						logrus.Warnf("Health check failed for %s: %s", config.Name, check)
+			// Only check ports and health if process is running
+			if processRunning {
+				// Check ports if configured
+				if len(config.Ports) > 0 {
+					allPortsOK := true
+					for _, port := range config.Ports {
+						if !isPortInUse(port) {
+							logrus.Warnf("Port %d is not in use for process %s", port, config.Name)
+							allPortsOK = false
+							break
+						}
+					}
+					if !allPortsOK {
 						needRestart = true
-						break
+					}
+				}
+				
+				// Check health checks if configured
+				if !needRestart && len(config.HealthChecks) > 0 {
+					allHealthOK := true
+					for _, check := range config.HealthChecks {
+						if !isHealthCheckOK(check) {
+							logrus.Warnf("Health check failed for %s: %s", config.Name, check)
+							allHealthOK = false
+							break
+						}
+					}
+					if !allHealthOK {
+						needRestart = true
 					}
 				}
 			}
 
 			// If process needs restart
 			if needRestart {
-				logrus.Warnf("Process %s failed health checks. Restarting...", config.Name)
-				cmd, err := restartProcess(config)
+				isRestarting = true
+				logrus.Warnf("Process %s needs to be restarted", config.Name)
+				
+				// Kill current process if it exists
+				if currentCmd != nil && currentCmd.Process != nil {
+					logrus.Infof("Terminating current process %s (PID: %d)", config.Name, currentCmd.Process.Pid)
+					currentCmd.Process.Kill()
+					currentCmd.Wait() // Wait for process to exit
+					currentCmd = nil
+				}
+				
+				// Kill any other instances of the process
+				killExistingProcesses(config.Name)
+				
+				// Wait for restart delay
+				if config.RestartDelay > 0 {
+					logrus.Infof("Waiting %d seconds before restart", config.RestartDelay)
+					time.Sleep(time.Duration(config.RestartDelay) * time.Second)
+				}
+				
+				// Start new process
+				cmd, err := startProcess(config)
 				if err != nil {
 					logrus.Errorf("Failed to restart process %s: %v", config.Name, err)
+					currentCmd = nil
 				} else {
+					logrus.Infof("Successfully restarted process %s (PID: %d)", config.Name, cmd.Process.Pid)
 					currentCmd = cmd
+					// Give the new process time to start up
+					time.Sleep(2 * time.Second)
 				}
-			} else {
+				
+				isRestarting = false
+			} else if processRunning {
 				logrus.Debugf("Process %s is healthy", config.Name)
 			}
 
 		case <-ctx.Done():
 			if currentCmd != nil && currentCmd.Process != nil {
-				logrus.Infof("Stopping process %s", config.Name)
+				logrus.Infof("Stopping process %s (PID: %d)", config.Name, currentCmd.Process.Pid)
 				currentCmd.Process.Kill()
+				currentCmd.Wait()
 			}
 			return
 		}
