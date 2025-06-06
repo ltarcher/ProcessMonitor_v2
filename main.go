@@ -4,9 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/shirou/gopsutil/v3/process"
-	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -18,6 +15,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/shirou/gopsutil/v3/process"
+	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v2"
 )
 
 // LogRotator handles log file rotation
@@ -69,13 +70,13 @@ func (lr *LogRotator) rotate() {
 	// Create backup filename with timestamp
 	now := time.Now()
 	backupName := fmt.Sprintf("%s.%s", lr.filename, now.Format("2006-01-02_15-04-05"))
-	
+
 	// Rename current log file to backup
 	if err := os.Rename(lr.filename, backupName); err != nil {
 		logrus.Errorf("Failed to rotate log file: %v", err)
 		return
 	}
-	
+
 	logrus.Infof("Log file rotated to: %s", backupName)
 }
 
@@ -90,15 +91,15 @@ func (lr *LogRotator) Close() error {
 func (lr *LogRotator) MonthlyCleanup() {
 	dir := filepath.Dir(lr.filename)
 	baseName := filepath.Base(lr.filename)
-	
+
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		logrus.Errorf("Failed to read log directory: %v", err)
 		return
 	}
-	
+
 	cutoff := time.Now().AddDate(0, -1, 0) // 1 month ago
-	
+
 	for _, file := range files {
 		if strings.HasPrefix(file.Name(), baseName+".") && !file.IsDir() {
 			if file.ModTime().Before(cutoff) {
@@ -132,13 +133,14 @@ type Config struct {
 
 // ProcessConfig represents the configuration for a single process
 type ProcessConfig struct {
-	Name          string   `yaml:"name"`
-	Args          []string `yaml:"args"`
-	Ports         []int    `yaml:"ports"`
-	HealthChecks  []string `yaml:"health_checks"`
-	CheckInterval int      `yaml:"check_interval"`
-	RestartDelay  int      `yaml:"restart_delay"`
-	KillOnExit    bool     `yaml:"kill_on_exit"`
+	Name             string   `yaml:"name"`
+	Args             []string `yaml:"args"`
+	Ports            []int    `yaml:"ports"`
+	HealthChecks     []string `yaml:"health_checks"`
+	CheckInterval    int      `yaml:"check_interval"`
+	RestartDelay     int      `yaml:"restart_delay"`
+	KillOnExit       bool     `yaml:"kill_on_exit"`
+	ExcludeProcesses []string `yaml:"exclude_processes"` // 进程排斥列表
 }
 
 // isProcessRunning checks if a process is running by name
@@ -158,6 +160,36 @@ func isProcessRunning(name string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// checkExcludeProcesses 检查排斥进程列表中的进程是否存在
+func checkExcludeProcesses(excludeProcesses []string) (bool, []string) {
+	if len(excludeProcesses) == 0 {
+		return false, nil
+	}
+
+	processes, err := process.Processes()
+	if err != nil {
+		logrus.Errorf("Failed to get process list: %v", err)
+		return false, nil
+	}
+
+	var foundProcesses []string
+
+	for _, excludeName := range excludeProcesses {
+		processName := filepath.Base(excludeName)
+		for _, p := range processes {
+			exe, _ := p.Exe()
+			cmdline, _ := p.Cmdline()
+			// Check both executable path and command line
+			if strings.Contains(exe, processName) || strings.Contains(cmdline, processName) {
+				foundProcesses = append(foundProcesses, excludeName)
+				break
+			}
+		}
+	}
+
+	return len(foundProcesses) > 0, foundProcesses
 }
 
 // isPortInUse checks if a port is in use
@@ -187,8 +219,14 @@ func isHealthCheckOK(url string) bool {
 
 // startProcess starts a new process
 func startProcess(config ProcessConfig) (*exec.Cmd, error) {
+	// 检查排斥进程列表
+	if hasExclude, foundProcesses := checkExcludeProcesses(config.ExcludeProcesses); hasExclude {
+		logrus.Warnf("Found exclude processes %v, skipping start of %s", foundProcesses, config.Name)
+		return nil, fmt.Errorf("exclude processes found: %v", foundProcesses)
+	}
+
 	var cmd *exec.Cmd
-	
+
 	// Handle relative paths by adding "./" prefix if needed
 	processName := config.Name
 	if !filepath.IsAbs(processName) && !strings.HasPrefix(processName, "./") && !strings.HasPrefix(processName, ".\\") {
@@ -198,16 +236,16 @@ func startProcess(config ProcessConfig) (*exec.Cmd, error) {
 			processName = "./" + processName
 		}
 	}
-	
+
 	cmd = exec.Command(processName, config.Args...)
-	
+
 	// Set process attributes to prevent automatic termination when parent exits
 	if runtime.GOOS == "windows" {
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 		}
 	}
-	
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Start()
@@ -218,7 +256,7 @@ func startProcess(config ProcessConfig) (*exec.Cmd, error) {
 func killExistingProcesses(name string) {
 	procs, _ := process.Processes()
 	processName := filepath.Base(name)
-	
+
 	for _, p := range procs {
 		exe, _ := p.Exe()
 		cmdline, _ := p.Cmdline()
@@ -241,7 +279,11 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 	logrus.Infof("Starting initial process: %s", config.Name)
 	cmd, err := startProcess(config)
 	if err != nil {
-		logrus.Errorf("Failed to start initial process %s: %v", config.Name, err)
+		if strings.Contains(err.Error(), "exclude processes found") {
+			logrus.Infof("Skipping initial start of %s due to exclude processes", config.Name)
+		} else {
+			logrus.Errorf("Failed to start initial process %s: %v", config.Name, err)
+		}
 	} else {
 		currentCmd = cmd
 		// Give the process some time to start up
@@ -259,7 +301,7 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 
 			needRestart := false
 			processRunning := false
-			
+
 			// Check if current command is still running
 			if currentCmd != nil && currentCmd.Process != nil {
 				// Check if process is still alive using process state
@@ -282,7 +324,7 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 					processRunning = true
 				}
 			}
-			
+
 			// Only check ports and health if process is running
 			if processRunning {
 				// Check ports if configured
@@ -299,7 +341,7 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 						needRestart = true
 					}
 				}
-				
+
 				// Check health checks if configured
 				if !needRestart && len(config.HealthChecks) > 0 {
 					allHealthOK := true
@@ -320,7 +362,7 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 			if needRestart {
 				isRestarting = true
 				logrus.Warnf("Process %s needs to be restarted", config.Name)
-				
+
 				// Kill current process if it exists
 				if currentCmd != nil && currentCmd.Process != nil {
 					logrus.Infof("Terminating current process %s (PID: %d)", config.Name, currentCmd.Process.Pid)
@@ -328,20 +370,24 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 					currentCmd.Wait() // Wait for process to exit
 					currentCmd = nil
 				}
-				
+
 				// Kill any other instances of the process
 				killExistingProcesses(config.Name)
-				
+
 				// Wait for restart delay
 				if config.RestartDelay > 0 {
 					logrus.Infof("Waiting %d seconds before restart", config.RestartDelay)
 					time.Sleep(time.Duration(config.RestartDelay) * time.Second)
 				}
-				
+
 				// Start new process
 				cmd, err := startProcess(config)
 				if err != nil {
-					logrus.Errorf("Failed to restart process %s: %v", config.Name, err)
+					if strings.Contains(err.Error(), "exclude processes found") {
+						logrus.Infof("Skipping restart of %s due to exclude processes", config.Name)
+					} else {
+						logrus.Errorf("Failed to restart process %s: %v", config.Name, err)
+					}
 					currentCmd = nil
 				} else {
 					logrus.Infof("Successfully restarted process %s (PID: %d)", config.Name, cmd.Process.Pid)
@@ -349,7 +395,7 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 					// Give the new process time to start up
 					time.Sleep(2 * time.Second)
 				}
-				
+
 				isRestarting = false
 			} else if processRunning {
 				logrus.Debugf("Process %s is healthy", config.Name)
@@ -372,7 +418,7 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 func createSelfMonitorScript() error {
 	var scriptContent string
 	var scriptName string
-	
+
 	if runtime.GOOS == "windows" {
 		scriptName = "monitor_watchdog.bat"
 		scriptContent = fmt.Sprintf(`@echo off
@@ -395,7 +441,7 @@ while true; do
     sleep 30
 done`, os.Args[0])
 	}
-	
+
 	return ioutil.WriteFile(scriptName, []byte(scriptContent), 0755)
 }
 
@@ -432,18 +478,18 @@ func main() {
 	// Set up logging with rotation (100MB limit)
 	logRotator := NewLogRotator("processmonitor.log", 100*1024*1024) // 100MB
 	defer logRotator.Close()
-	
+
 	logrus.SetOutput(logRotator)
 	logrus.SetLevel(logrus.InfoLevel)
 	logrus.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
-	
+
 	// Start monthly cleanup routine
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour) // Check daily
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ticker.C:
@@ -474,7 +520,7 @@ func main() {
 	<-sigs
 	logrus.Info("Received shutdown signal, stopping all processes...")
 	cancel()
-	
+
 	// Give processes time to shutdown gracefully
 	time.Sleep(2 * time.Second)
 	logrus.Info("Process monitor shutdown complete")

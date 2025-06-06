@@ -6,3 +6,4 @@ processes:
     check_interval: 10
     restart_delay: 5
     kill_on_exit: false
+    exclude_processes: ["notepad.exe"]  # 当记事本运行时不启动/重启测试应用
