@@ -1,3 +1,6 @@
+# 获取当前构建时间并格式化
+$buildTime = Get-Date -Format "yyyyMMdd-HHmmss"
+
 # 获取git commit id
 $commitId = git rev-parse HEAD
 
@@ -7,8 +10,11 @@ if ($LASTEXITCODE -ne 0) {
     $commitId = "development"
 }
 
+# 组合版本信息
+$version = "$buildTime-$commitId"
+
 # 构建可执行文件
-$buildCmd = "go build -ldflags ""-X main.version=$commitId"" -o ProcessMonitor.exe"
+$buildCmd = "go build -ldflags ""-X main.version=$version"" -o ProcessMonitor.exe"
 Write-Host "Building with command: $buildCmd"
 Invoke-Expression $buildCmd
 
