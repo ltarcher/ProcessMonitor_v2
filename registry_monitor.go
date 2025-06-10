@@ -174,7 +174,7 @@ func setRegistryValue(k registry.Key, name string, valueType string, value inter
 	case "string":
 		strValue, ok := value.(string)
 		if !ok {
-			return fmt.Errorf("value is not a string")
+			return fmt.Errorf("value for string type must be string, got %T", value)
 		}
 		return k.SetStringValue(name, strValue)
 
@@ -417,9 +417,71 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 					// 检查是否与期望值匹配
 					if valueConfig.ExpectValue != nil {
 						if !compareValues(val, valueConfig.ExpectValue, valueConfig.Type) {
-							logrus.Warnf("Value %s does not match expected value. Got: %v, Expected: %v",
-								valueConfig.Name, val, valueConfig.ExpectValue)
+							logrus.Warnf("Value %s does not match expected value. Got: %v (%T), Expected: %v (%T)",
+								valueConfig.Name, val, val, valueConfig.ExpectValue, valueConfig.ExpectValue)
 							hasExpectValueMismatch = true
+
+							// 立即恢复期望值，带重试机制
+							var lastErr error
+							for attempt := 1; attempt <= 3; attempt++ {
+								k.Close()
+								logrus.Debugf("Attempt %d: Opening key for writing with SET_VALUE permission", attempt)
+								k, err = registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE|registry.SET_VALUE)
+								if err != nil {
+									lastErr = fmt.Errorf("failed to open key for writing (attempt %d): %v", attempt, err)
+									logrus.Error(lastErr)
+									time.Sleep(100 * time.Millisecond)
+									continue
+								}
+
+								logrus.Debugf("Attempt %d: Restoring value %s to %v", attempt, valueConfig.Name, valueConfig.ExpectValue)
+								if err := setRegistryValue(k, valueConfig.Name, valueConfig.Type, valueConfig.ExpectValue); err != nil {
+									lastErr = fmt.Errorf("failed to restore value (attempt %d): %v", attempt, err)
+									logrus.Error(lastErr)
+									k.Close()
+									time.Sleep(100 * time.Millisecond)
+									continue
+								}
+
+								// 验证恢复是否成功
+								val, _, err := k.GetValue(valueConfig.Name, nil)
+								if err != nil || !compareValues(val, valueConfig.ExpectValue, valueConfig.Type) {
+									lastErr = fmt.Errorf("verification failed after restore (attempt %d): %v", attempt, err)
+									logrus.Error(lastErr)
+									k.Close()
+									time.Sleep(100 * time.Millisecond)
+									continue
+								}
+
+								// 恢复成功
+								valueMap[valueConfig.Name] = valueConfig.ExpectValue
+								logrus.Infof("Successfully restored expected value for %s (attempt %d)", valueConfig.Name, attempt)
+								lastErr = nil
+								break
+							}
+
+							if lastErr != nil {
+								// 尝试使用ALL_ACCESS作为最后手段
+								k.Close()
+								logrus.Warnf("Trying ALL_ACCESS as last resort")
+								k, err = registry.OpenKey(rootKey, config.Path, registry.ALL_ACCESS)
+								if err == nil {
+									if err := setRegistryValue(k, valueConfig.Name, valueConfig.Type, valueConfig.ExpectValue); err == nil {
+										valueMap[valueConfig.Name] = valueConfig.ExpectValue
+										logrus.Infof("Successfully restored with ALL_ACCESS")
+										lastErr = nil
+									}
+								}
+							}
+
+							k.Close()
+							logrus.Debugf("Reopening key for monitoring")
+							k, err = registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE|registry.NOTIFY)
+							if err != nil {
+								logrus.Errorf("Failed to reopen registry key after writing: %v", err)
+								continue
+							}
+							logrus.Debugf("Successfully reopened key for monitoring")
 						} else {
 							logrus.Infof("Value %s matches expected value: %v", valueConfig.Name, val)
 						}
