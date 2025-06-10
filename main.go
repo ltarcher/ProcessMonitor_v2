@@ -544,8 +544,10 @@ func isAdmin() bool {
 	return member
 }
 
-func main() {
+// 版本信息，将在编译时通过 -ldflags 注入
+var version = "development"
 
+func main() {
 	// 检查管理员权限
 	if !isAdmin() {
 		logrus.Fatal("此程序需要管理员权限运行。请右键点击程序，选择'以管理员身份运行'。")
@@ -554,7 +556,14 @@ func main() {
 	// Parse command line flags
 	configFile := flag.String("config", "config.yaml", "path to config file")
 	createWatchdog := flag.Bool("create-watchdog", false, "create watchdog script for self-monitoring")
+	showVersion := flag.Bool("v", false, "show version information")
 	flag.Parse()
+
+	// 显示版本信息
+	if *showVersion {
+		fmt.Printf("Process Monitor version %s\n", version)
+		os.Exit(0)
+	}
 
 	// Create watchdog script if requested
 	if *createWatchdog {
