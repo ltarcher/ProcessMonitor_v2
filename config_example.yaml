@@ -59,6 +59,8 @@ processes:
   # 示例6: 进程排斥功能演示
   - name: "test_app.exe"                    # 测试应用
     args: []
+    restart_command: "test_app_recovery.exe" # 重启时使用的备用程序路径
+    work_dir: "./app_directory"             # 程序的工作目录
     ports: [8080]                           # 监控8080端口
     health_checks:                          # HTTP健康检查
       - "http://localhost:8080/health"
@@ -66,6 +68,19 @@ processes:
     restart_delay: 5                        # 重启前等待5秒
     kill_on_exit: false                     # 监控狗退出时保留进程
     exclude_processes: ["notepad.exe", "calc.exe"]  # 当记事本或计算器运行时不启动/重启
+
+  # 示例7: 重启命令和工作目录功能演示
+  - name: "api_server.exe"                  # 主程序
+    args: ["-config", "config.json"]
+    restart_command: "api_server_fallback.exe" # 重启时使用的备用程序
+    work_dir: "C:\\Program Files\\MyApp\\api" # 指定工作目录（绝对路径）
+    ports: [3000]                           # 监控3000端口
+    health_checks:                          # HTTP健康检查
+      - "http://localhost:3000/api/health"
+    check_interval: 15                      # 每15秒检查一次
+    restart_delay: 3                        # 重启前等待3秒
+    kill_on_exit: true                      # 监控狗退出时杀死进程
+    exclude_processes: []                   # 无排斥进程
 
 # 进程排斥功能说明：
 # exclude_processes 配置项用于指定进程排斥列表
@@ -79,3 +94,20 @@ processes:
 # - 部署过程中（如部署脚本运行时）
 # - 资源冲突避免（如同类服务运行时）
 # - 手动干预期间（如调试工具运行时）
+
+# 重启命令和工作目录功能说明：
+# restart_command 配置项用于指定重启时使用的可执行文件路径
+# - 如果未指定，将使用原始的 name 字段指定的程序
+# - 支持相对路径和绝对路径
+# - 适用场景：
+#   * 使用备用/恢复版本的程序进行重启
+#   * 在故障时切换到备份程序
+#   * 使用特殊的恢复模式启动程序
+#
+# work_dir 配置项用于指定程序的工作目录
+# - 如果未指定，将使用监控程序的当前工作目录
+# - 支持相对路径和绝对路径
+# - 适用场景：
+#   * 程序需要在特定目录下运行
+#   * 程序依赖于特定目录下的配置文件
+#   * 多个相同程序需要在不同目录下运行

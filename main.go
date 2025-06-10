@@ -135,6 +135,8 @@ type Config struct {
 type ProcessConfig struct {
 	Name             string   `yaml:"name"`
 	Args             []string `yaml:"args"`
+	RestartCommand   string   `yaml:"restart_command"` // 新增：重启时使用的程序路径
+	WorkDir          string   `yaml:"work_dir"`        // 新增：程序的工作目录
 	Ports            []int    `yaml:"ports"`
 	HealthChecks     []string `yaml:"health_checks"`
 	CheckInterval    int      `yaml:"check_interval"`
@@ -218,7 +220,7 @@ func isHealthCheckOK(url string) bool {
 }
 
 // startProcess starts a new process
-func startProcess(config ProcessConfig) (*exec.Cmd, error) {
+func startProcess(config ProcessConfig, isRestart bool) (*exec.Cmd, error) {
 	// 检查排斥进程列表
 	if hasExclude, foundProcesses := checkExcludeProcesses(config.ExcludeProcesses); hasExclude {
 		logrus.Warnf("Found exclude processes %v, skipping start of %s", foundProcesses, config.Name)
@@ -227,8 +229,19 @@ func startProcess(config ProcessConfig) (*exec.Cmd, error) {
 
 	var cmd *exec.Cmd
 
-	// Handle relative paths by adding "./" prefix if needed
+	if isRestart {
+		// 如果是重启
+		logrus.Infof("restart process: %s", config.Name)
+	}
+
+	// 确定使用哪个程序路径
 	processName := config.Name
+	if config.RestartCommand != "" {
+		processName = config.RestartCommand
+		logrus.Infof("Using restart command for process: %s", processName)
+	}
+
+	// Handle relative paths by adding "./" prefix if needed
 	if !filepath.IsAbs(processName) && !strings.HasPrefix(processName, "./") && !strings.HasPrefix(processName, ".\\") {
 		if runtime.GOOS == "windows" {
 			processName = ".\\" + processName
@@ -238,6 +251,12 @@ func startProcess(config ProcessConfig) (*exec.Cmd, error) {
 	}
 
 	cmd = exec.Command(processName, config.Args...)
+
+	// 设置工作目录（如果指定）
+	if config.WorkDir != "" {
+		cmd.Dir = config.WorkDir
+		logrus.Infof("Setting working directory for %s: %s", config.Name, config.WorkDir)
+	}
 
 	// Set process attributes to prevent automatic termination when parent exits
 	if runtime.GOOS == "windows" {
@@ -277,7 +296,7 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 
 	// Start the process initially
 	logrus.Infof("Starting initial process: %s", config.Name)
-	cmd, err := startProcess(config)
+	cmd, err := startProcess(config, false) // 初始启动，isRestart = false
 	if err != nil {
 		if strings.Contains(err.Error(), "exclude processes found") {
 			logrus.Infof("Skipping initial start of %s due to exclude processes", config.Name)
@@ -381,7 +400,7 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 				}
 
 				// Start new process
-				cmd, err := startProcess(config)
+				cmd, err := startProcess(config, true) // 重启进程，isRestart = true
 				if err != nil {
 					if strings.Contains(err.Error(), "exclude processes found") {
 						logrus.Infof("Skipping restart of %s due to exclude processes", config.Name)
