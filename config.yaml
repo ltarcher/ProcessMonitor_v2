@@ -31,11 +31,16 @@ registry_monitors:
   - name: "监控系统代理设置"
     root_key: "HKCU"                   # 根键 (HKLM, HKCU, HKCR, HKU, HKCC)
     path: "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
-    value_names:                       # 要监控的值名称
-      - "ProxyEnable"
-      - "ProxyServer"
+    values:                            # 要监控的值列表
+      - name: "ProxyEnable"            # 值名称
+        type: "dword"                  # 值类型
+        expect_value: 1                # 期望值（1表示启用代理）
+      - name: "ProxyServer"            # 值名称
+        type: "string"                 # 值类型
+        expect_value: "127.0.0.1:8080" # 期望的代理服务器地址
     check_interval: 10                 # 检查间隔（秒）
-    command: "powershell.exe"          # 值变化时执行的命令
+    execute_on_change: true            # 值变化时执行命令
+    command: "powershell.exe"          # 要执行的命令
     args:                              # 命令参数
       - "-ExecutionPolicy"
       - "Bypass"
@@ -46,10 +51,30 @@ registry_monitors:
   - name: "监控应用程序设置"
     root_key: "HKLM"
     path: "SOFTWARE\\MyApp\\Settings"
-    value_names:
-      - "ConfigVersion"
-      - "UpdateInterval"
-    check_interval: 60
+    values:                            # 要监控的值列表
+      - name: "ConfigVersion"          # 值名称
+        type: "string"                 # 值类型
+        # 不设置expect_value，只监控变化
+      - name: "UpdateInterval"         # 值名称
+        type: "dword"                  # 值类型
+        expect_value: 60               # 期望值（60分钟更新间隔）
+    check_interval: 60                 # 检查间隔（秒）
+    execute_on_change: true            # 值变化时执行命令
     command: "C:\\Apps\\MyApp\\update_config.exe"
     args: ["--reload"]
     work_dir: "C:\\Apps\\MyApp"
+
+# 注册表监控功能说明：
+# values 配置项定义了要监控的注册表值：
+# - name: 值名称
+# - type: 值类型（支持 string, expand_string, binary, dword, multi_string, qword）
+# - expect_value: 期望值（可选，用于验证值是否符合预期）
+#
+# execute_on_change: 控制是否在值变化时执行命令
+# - true: 值变化时执行指定的命令
+# - false: 只记录变化，不执行命令
+#
+# 环境变量传递：
+# 当配置了命令执行时，以下环境变量会传递给命令：
+# - CHANGED_VALUES: 发生变化的值名称列表（逗号分隔）
+# - EXPECT_VALUE_MATCH: 是否所有变化的值都匹配期望值（true/false）
