@@ -223,6 +223,15 @@ func isHealthCheckOK(url string) bool {
 
 // startProcess starts a new process
 func startProcess(config ProcessConfig, isRestart bool) (*exec.Cmd, error) {
+	// 检查进程是否已经在运行
+	running, err := isProcessRunning(config.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if process is running: %v", err)
+	}
+	if running {
+		return nil, fmt.Errorf("process %s is already running", config.Name)
+	}
+
 	// 检查排斥进程列表
 	if hasExclude, foundProcesses := checkExcludeProcesses(config.ExcludeProcesses); hasExclude {
 		logrus.Warnf("Found exclude processes %v, skipping start of %s", foundProcesses, config.Name)
@@ -269,7 +278,7 @@ func startProcess(config ProcessConfig, isRestart bool) (*exec.Cmd, error) {
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err := cmd.Start()
+	err = cmd.Start()
 	return cmd, err
 }
 
@@ -296,19 +305,27 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 	var currentCmd *exec.Cmd
 	var isRestarting bool
 
-	// Start the process initially
-	logrus.Infof("Starting initial process: %s", config.Name)
-	cmd, err := startProcess(config, false) // 初始启动，isRestart = false
+	// Check if process is already running before initial start
+	running, err := isProcessRunning(config.Name)
 	if err != nil {
-		if strings.Contains(err.Error(), "exclude processes found") {
-			logrus.Infof("Skipping initial start of %s due to exclude processes", config.Name)
-		} else {
-			logrus.Errorf("Failed to start initial process %s: %v", config.Name, err)
-		}
+		logrus.Errorf("Failed to check if process %s is running: %v", config.Name, err)
+	} else if running {
+		logrus.Infof("Process %s is already running, skipping initial start", config.Name)
 	} else {
-		currentCmd = cmd
-		// Give the process some time to start up
-		time.Sleep(2 * time.Second)
+		// Start the process initially only if it's not already running
+		logrus.Infof("Starting initial process: %s", config.Name)
+		cmd, err := startProcess(config, false) // 初始启动，isRestart = false
+		if err != nil {
+			if strings.Contains(err.Error(), "exclude processes found") {
+				logrus.Infof("Skipping initial start of %s due to exclude processes", config.Name)
+			} else {
+				logrus.Errorf("Failed to start initial process %s: %v", config.Name, err)
+			}
+		} else {
+			currentCmd = cmd
+			// Give the process some time to start up
+			time.Sleep(2 * time.Second)
+		}
 	}
 
 	for {

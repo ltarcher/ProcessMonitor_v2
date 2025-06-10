@@ -6,63 +6,36 @@ processes:
   - name: "notepad.exe"                # 要监控的进程名称
     args: []                           # 启动进程的参数
     restart_command: "notepad.exe"     # 重启时使用的命令（可选，默认使用name）
-    work_dir: ""                       # 工作目录（可选）
+    work_dir: "C:\\Windows\\System32"                       # 工作目录（可选）
     ports: []                          # 要监控的端口（可选）
     health_checks: []                  # 健康检查URL（可选）
     check_interval: 10                 # 检查间隔（秒）
     restart_delay: 5                   # 重启延迟（秒）
-    kill_on_exit: true                 # 监控器退出时是否杀死进程
+    kill_on_exit: false                 # 监控器退出时是否杀死进程
     exclude_processes: []              # 排斥进程列表（如果这些进程存在，则不启动当前进程）
-
-  - name: "example_server.exe"
-    args: ["--port", "8080"]
-    restart_command: "example_server.exe"
-    work_dir: "C:/apps/example_server"
-    ports: [8080, 8081]                # 监控这些端口是否在使用
-    health_checks:                     # 健康检查URL
-      - "http://localhost:8080/health"
-    check_interval: 30
-    restart_delay: 10
-    kill_on_exit: false
-    exclude_processes: ["maintenance.exe"]
 
 # 注册表监控配置（仅Windows系统有效）
 registry_monitors:
-  - name: "监控系统代理设置"
-    root_key: "HKCU"                   # 根键 (HKLM, HKCU, HKCR, HKU, HKCC)
-    path: "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
-    values:                            # 要监控的值列表
-      - name: "ProxyEnable"            # 值名称
-        type: "dword"                  # 值类型
-        expect_value: 1                # 期望值（1表示启用代理）
-      - name: "ProxyServer"            # 值名称
-        type: "string"                 # 值类型
-        expect_value: "127.0.0.1:8080" # 期望的代理服务器地址
-    check_interval: 10                 # 检查间隔（秒）
-    execute_on_change: true            # 值变化时执行命令
-    command: "powershell.exe"          # 要执行的命令
-    args:                              # 命令参数
-      - "-ExecutionPolicy"
-      - "Bypass"
-      - "-File"
-      - "update_proxy.ps1"
-    work_dir: ""                       # 工作目录（可选）
-
-  - name: "监控应用程序设置"
+  - name: "Windows自动登录监控"
     root_key: "HKLM"
-    path: "SOFTWARE\\MyApp\\Settings"
-    values:                            # 要监控的值列表
-      - name: "ConfigVersion"          # 值名称
-        type: "string"                 # 值类型
+    path: "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
+    values:
+      - name: "AutoAdminLogon"
+        type: "string"
+        expect_value: "1"                  # 1表示启用自动登录
+      - name: "DefaultUserName"
+        type: "string"
         # 不设置expect_value，只监控变化
-      - name: "UpdateInterval"         # 值名称
-        type: "dword"                  # 值类型
-        expect_value: 60               # 期望值（60分钟更新间隔）
-    check_interval: 60                 # 检查间隔（秒）
-    execute_on_change: true            # 值变化时执行命令
-    command: "C:\\Apps\\MyApp\\update_config.exe"
-    args: ["--reload"]
-    work_dir: "C:\\Apps\\MyApp"
+      - name: "DefaultPassword"
+        type: "string"
+        # 不设置expect_value，只监控变化
+      - name: "DefaultDomainName"
+        type: "string"
+        # 不设置expect_value，只监控变化
+    check_interval: 60                     # 每60秒检查一次
+    execute_on_change: false                # 值变化时执行命令
+    command: "powershell.exe"
+
 
 # 注册表监控功能说明：
 # values 配置项定义了要监控的注册表值：
