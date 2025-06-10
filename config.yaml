@@ -26,10 +26,10 @@ registry_monitors:
         expect_value: "1"                  # 1表示启用自动登录
       - name: "DefaultUserName"
         type: "string"
-        # 不设置expect_value，只监控变化
+        expect_value: "Admin"
       - name: "DefaultPassword"
         type: "string"
-        # 不设置expect_value，只监控变化
+        expect_value: "123456"
       - name: "DefaultDomainName"
         type: "string"
         # 不设置expect_value，只监控变化

@@ -37,6 +37,7 @@ type RegistryMonitor struct {
 
 // getRegistryValueType 将字符串类型转换为 windows registry 值类型
 func getRegistryValueType(typeName string) (uint32, error) {
+	logrus.Debugf("Converting registry type string: %s", typeName)
 	switch strings.ToLower(typeName) {
 	case "string":
 		return registry.SZ, nil
@@ -57,6 +58,9 @@ func getRegistryValueType(typeName string) (uint32, error) {
 
 // compareValues 比较注册表值与期望值
 func compareValues(actual interface{}, expect interface{}, valueType string) bool {
+	logrus.Debugf("Comparing values - Type: %s, Actual: %v (%T), Expected: %v (%T)",
+		valueType, actual, actual, expect, expect)
+
 	// 如果没有设置期望值，则不进行比较
 	if expect == nil {
 		return true
@@ -65,11 +69,28 @@ func compareValues(actual interface{}, expect interface{}, valueType string) boo
 	// 根据值类型进行比较
 	switch strings.ToLower(valueType) {
 	case "string", "expand_string":
-		actualStr, ok1 := actual.(string)
-		expectStr, ok2 := expect.(string)
-		if !ok1 || !ok2 {
+		// 尝试将实际值转换为string
+		var actualStr string
+		switch v := actual.(type) {
+		case string:
+			actualStr = v
+		case int, int32, int64, uint, uint32, uint64:
+			actualStr = fmt.Sprintf("%d", v)
+		default:
 			return false
 		}
+
+		// 尝试将期望值转换为string
+		var expectStr string
+		switch v := expect.(type) {
+		case string:
+			expectStr = v
+		case int, int32, int64, uint, uint32, uint64:
+			expectStr = fmt.Sprintf("%d", v)
+		default:
+			return false
+		}
+
 		return actualStr == expectStr
 
 	case "dword", "qword":
@@ -147,6 +168,8 @@ func getRootKey(rootKeyName string) (registry.Key, error) {
 
 // setRegistryValue 根据类型设置注册表值
 func setRegistryValue(k registry.Key, name string, valueType string, value interface{}) error {
+	logrus.Debugf("Setting registry value - Name: %s, Type: %s, Value: %v (%T)",
+		name, valueType, value, value)
 	switch strings.ToLower(valueType) {
 	case "string":
 		strValue, ok := value.(string)
@@ -332,8 +355,10 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 				}
 
 				// 读取值和类型
+				logrus.Debugf("Attempting to read registry value %s with expected type %s", valueConfig.Name, valueConfig.Type)
 				val, valType, err := k.GetValue(valueConfig.Name, nil)
 				if err != nil {
+					logrus.Debugf("Failed to read registry value %s: %v", valueConfig.Name, err)
 					// 如果值不存在且有期望值，则设置期望值
 					if err == registry.ErrNotExist && valueConfig.ExpectValue != nil {
 						logrus.Infof("Value %s does not exist during monitoring, setting expected value", valueConfig.Name)
@@ -376,12 +401,15 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 						valueConfig.Name, expectedType, valType)
 					continue
 				}
+				logrus.Debugf("Raw registry value - Name: %s, Type: %d, Value: %v", valueConfig.Name, valType, val)
 
 				// 比较值
 				oldVal, exists := valueMap[valueConfig.Name]
+				// 增强日志输出，显示值类型和内容
+				logrus.Infof("Registry value changed - Key: %s\\%s\\%s, Type: %s, Old: %v (%T), New: %v (%T)",
+					config.RootKey, config.Path, valueConfig.Name, valueConfig.Type,
+					oldVal, oldVal, val, val)
 				if !exists || !compareValues(oldVal, val, valueConfig.Type) {
-					logrus.Infof("Registry value changed: %s\\%s\\%s: %v -> %v",
-						config.RootKey, config.Path, valueConfig.Name, oldVal, val)
 					valueMap[valueConfig.Name] = val
 					changed = true
 					changedValues = append(changedValues, valueConfig.Name)
