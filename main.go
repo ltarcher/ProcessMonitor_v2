@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/windows"
 	"gopkg.in/yaml.v3"
 )
 
@@ -506,7 +508,49 @@ func loadConfig(configFile string) (Config, error) {
 	return config, nil
 }
 
+// isAdmin 检查当前用户是否具有管理员权限
+func isAdmin() bool {
+	// 使用windows包提供的API检查管理员权限
+	var sid *windows.SID
+	err := windows.AllocateAndInitializeSid(
+		&windows.SECURITY_NT_AUTHORITY,
+		2,
+		windows.SECURITY_BUILTIN_DOMAIN_RID,
+		windows.DOMAIN_ALIAS_RID_ADMINS,
+		0, 0, 0, 0, 0, 0,
+		&sid)
+	if err != nil {
+		log.Printf("初始化SID失败: %v", err)
+		// 回退到物理驱动器检查
+		if _, err := os.Open("\\\\.\\PHYSICALDRIVE0"); err == nil {
+			return true
+		}
+		return false
+	}
+	defer windows.FreeSid(sid)
+
+	// 检查当前进程令牌
+	token := windows.Token(0)
+	member, err := token.IsMember(sid)
+	if err != nil {
+		log.Printf("检查令牌成员关系失败: %v", err)
+		// 回退到物理驱动器检查
+		if _, err := os.Open("\\\\.\\PHYSICALDRIVE0"); err == nil {
+			return true
+		}
+		return false
+	}
+
+	return member
+}
+
 func main() {
+
+	// 检查管理员权限
+	if !isAdmin() {
+		logrus.Fatal("此程序需要管理员权限运行。请右键点击程序，选择'以管理员身份运行'。")
+	}
+
 	// Parse command line flags
 	configFile := flag.String("config", "config.yaml", "path to config file")
 	createWatchdog := flag.Bool("create-watchdog", false, "create watchdog script for self-monitoring")

@@ -145,6 +145,101 @@ func getRootKey(rootKeyName string) (registry.Key, error) {
 	}
 }
 
+// setRegistryValue 根据类型设置注册表值
+func setRegistryValue(k registry.Key, name string, valueType string, value interface{}) error {
+	switch strings.ToLower(valueType) {
+	case "string":
+		strValue, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("value is not a string")
+		}
+		return k.SetStringValue(name, strValue)
+
+	case "expand_string":
+		strValue, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("value is not a string")
+		}
+		return k.SetExpandStringValue(name, strValue)
+
+	case "binary":
+		var byteValue []byte
+		switch v := value.(type) {
+		case []byte:
+			byteValue = v
+		case string:
+			byteValue = []byte(v)
+		default:
+			return fmt.Errorf("value cannot be converted to binary")
+		}
+		return k.SetBinaryValue(name, byteValue)
+
+	case "dword":
+		var dwordValue uint32
+		switch v := value.(type) {
+		case int:
+			dwordValue = uint32(v)
+		case int64:
+			dwordValue = uint32(v)
+		case uint:
+			dwordValue = uint32(v)
+		case uint32:
+			dwordValue = v
+		case uint64:
+			dwordValue = uint32(v)
+		case float64:
+			dwordValue = uint32(v)
+		default:
+			return fmt.Errorf("value cannot be converted to DWORD")
+		}
+		return k.SetDWordValue(name, dwordValue)
+
+	case "qword":
+		var qwordValue uint64
+		switch v := value.(type) {
+		case int:
+			qwordValue = uint64(v)
+		case int64:
+			qwordValue = uint64(v)
+		case uint:
+			qwordValue = uint64(v)
+		case uint32:
+			qwordValue = uint64(v)
+		case uint64:
+			qwordValue = v
+		case float64:
+			qwordValue = uint64(v)
+		default:
+			return fmt.Errorf("value cannot be converted to QWORD")
+		}
+		return k.SetQWordValue(name, qwordValue)
+
+	case "multi_string":
+		var strValues []string
+		switch v := value.(type) {
+		case []string:
+			strValues = v
+		case string:
+			strValues = []string{v}
+		case []interface{}:
+			strValues = make([]string, len(v))
+			for i, item := range v {
+				if str, ok := item.(string); ok {
+					strValues[i] = str
+				} else {
+					return fmt.Errorf("multi_string array contains non-string value")
+				}
+			}
+		default:
+			return fmt.Errorf("value cannot be converted to multi-string")
+		}
+		return k.SetStringsValue(name, strValues)
+
+	default:
+		return fmt.Errorf("unsupported registry value type: %s", valueType)
+	}
+}
+
 // MonitorRegistry 监控注册表键值的变化
 func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
@@ -162,8 +257,8 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 	valueMap := make(map[string]interface{})
 	valueTypeMap := make(map[string]string)
 
-	// 初始化值映射
-	k, err := registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE)
+	// 初始化值映射，添加写入权限
+	k, err := registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		logrus.Errorf("Failed to open registry key %s\\%s: %v", config.RootKey, config.Path, err)
 		return
@@ -182,6 +277,19 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 		// 读取值和类型
 		val, valType, err := k.GetValue(valueConfig.Name, nil)
 		if err != nil {
+			// 如果值不存在且有期望值，则设置期望值
+			if err == registry.ErrNotExist && valueConfig.ExpectValue != nil {
+				logrus.Infof("Value %s does not exist, setting expected value", valueConfig.Name)
+				if setErr := setRegistryValue(k, valueConfig.Name, valueConfig.Type, valueConfig.ExpectValue); setErr != nil {
+					logrus.Errorf("Failed to set expected value for %s: %v", valueConfig.Name, setErr)
+					continue
+				}
+				valueMap[valueConfig.Name] = valueConfig.ExpectValue
+				valueTypeMap[valueConfig.Name] = valueConfig.Type
+				logrus.Infof("Successfully set expected value for %s", valueConfig.Name)
+				continue
+			}
+
 			logrus.Warnf("Failed to read registry value %s: %v", valueConfig.Name, err)
 			continue
 		}
@@ -226,6 +334,38 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 				// 读取值和类型
 				val, valType, err := k.GetValue(valueConfig.Name, nil)
 				if err != nil {
+					// 如果值不存在且有期望值，则设置期望值
+					if err == registry.ErrNotExist && valueConfig.ExpectValue != nil {
+						logrus.Infof("Value %s does not exist during monitoring, setting expected value", valueConfig.Name)
+						k.Close() // 关闭只读句柄
+
+						// 重新打开键以获取写入权限
+						k, err = registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE|registry.SET_VALUE)
+						if err != nil {
+							logrus.Errorf("Failed to open registry key for writing: %v", err)
+							continue
+						}
+
+						if setErr := setRegistryValue(k, valueConfig.Name, valueConfig.Type, valueConfig.ExpectValue); setErr != nil {
+							logrus.Errorf("Failed to set expected value for %s: %v", valueConfig.Name, setErr)
+							continue
+						}
+
+						// 重新打开键以恢复原来的访问权限
+						k.Close()
+						k, err = registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE|registry.NOTIFY)
+						if err != nil {
+							logrus.Errorf("Failed to reopen registry key after writing: %v", err)
+							continue
+						}
+
+						valueMap[valueConfig.Name] = valueConfig.ExpectValue
+						changed = true
+						changedValues = append(changedValues, valueConfig.Name)
+						logrus.Infof("Successfully set expected value for %s during monitoring", valueConfig.Name)
+						continue
+					}
+
 					logrus.Warnf("Failed to read registry value %s: %v", valueConfig.Name, err)
 					continue
 				}
