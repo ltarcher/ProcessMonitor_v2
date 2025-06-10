@@ -1,9 +1,55 @@
+# 进程监控器配置文件示例
+# 包含进程监控和注册表监控配置
+
+# 进程监控配置
 processes:
-  - name: "test_app.exe"
-    args: []
-    ports: [8080]
-    health_checks: ["http://localhost:8080/health"]
-    check_interval: 10
-    restart_delay: 5
+  - name: "notepad.exe"                # 要监控的进程名称
+    args: []                           # 启动进程的参数
+    restart_command: "notepad.exe"     # 重启时使用的命令（可选，默认使用name）
+    work_dir: ""                       # 工作目录（可选）
+    ports: []                          # 要监控的端口（可选）
+    health_checks: []                  # 健康检查URL（可选）
+    check_interval: 10                 # 检查间隔（秒）
+    restart_delay: 5                   # 重启延迟（秒）
+    kill_on_exit: true                 # 监控器退出时是否杀死进程
+    exclude_processes: []              # 排斥进程列表（如果这些进程存在，则不启动当前进程）
+
+  - name: "example_server.exe"
+    args: ["--port", "8080"]
+    restart_command: "example_server.exe"
+    work_dir: "C:/apps/example_server"
+    ports: [8080, 8081]                # 监控这些端口是否在使用
+    health_checks:                     # 健康检查URL
+      - "http://localhost:8080/health"
+    check_interval: 30
+    restart_delay: 10
     kill_on_exit: false
-    exclude_processes: ["OllamaSetup.exe"]  # 当Ollama更新或安装运行时不启动/重启测试应用
+    exclude_processes: ["maintenance.exe"]
+
+# 注册表监控配置（仅Windows系统有效）
+registry_monitors:
+  - name: "监控系统代理设置"
+    root_key: "HKCU"                   # 根键 (HKLM, HKCU, HKCR, HKU, HKCC)
+    path: "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
+    value_names:                       # 要监控的值名称
+      - "ProxyEnable"
+      - "ProxyServer"
+    check_interval: 10                 # 检查间隔（秒）
+    command: "powershell.exe"          # 值变化时执行的命令
+    args:                              # 命令参数
+      - "-ExecutionPolicy"
+      - "Bypass"
+      - "-File"
+      - "update_proxy.ps1"
+    work_dir: ""                       # 工作目录（可选）
+
+  - name: "监控应用程序设置"
+    root_key: "HKLM"
+    path: "SOFTWARE\\MyApp\\Settings"
+    value_names:
+      - "ConfigVersion"
+      - "UpdateInterval"
+    check_interval: 60
+    command: "C:\\Apps\\MyApp\\update_config.exe"
+    args: ["--reload"]
+    work_dir: "C:\\Apps\\MyApp"

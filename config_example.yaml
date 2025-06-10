@@ -95,6 +95,115 @@ processes:
 # - 资源冲突避免（如同类服务运行时）
 # - 手动干预期间（如调试工具运行时）
 
+# 注册表监控配置示例
+registry_monitors:
+  # 示例1: 监控系统代理设置
+  - name: "系统代理监控"
+    root_key: "HKCU"                        # HKEY_CURRENT_USER
+    path: "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
+    values:                                 # 要监控的值列表
+      - name: "ProxyEnable"                 # 值名称
+        type: "dword"                       # 值类型
+        expect_value: 1                     # 期望值（1表示启用代理）
+      - name: "ProxyServer"                 # 值名称
+        type: "string"                      # 值类型
+        expect_value: "127.0.0.1:8080"     # 期望的代理服务器地址
+    check_interval: 10                      # 每10秒检查一次
+    execute_on_change: true                 # 值变化时执行命令
+    command: "powershell.exe"              # 要执行的命令
+    args:                                   # 命令参数
+      - "-ExecutionPolicy"
+      - "Bypass"
+      - "-File"
+      - "update_proxy.ps1"
+    work_dir: "scripts"                    # 脚本所在目录
+
+  # 示例2: 监控防火墙配置
+  - name: "防火墙配置监控"
+    root_key: "HKLM"                        # HKEY_LOCAL_MACHINE
+    path: "SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\StandardProfile"
+    values:
+      - name: "EnableFirewall"
+        type: "dword"
+        expect_value: 1                     # 期望防火墙开启
+    check_interval: 30                      # 每30秒检查一次
+    execute_on_change: true                 # 值变化时执行命令
+    command: "cmd.exe"
+    args: ["/c", "echo 防火墙状态改变 >> firewall_changes.log"]
+
+  # 示例3: 监控自启动项
+  - name: "自启动项监控"
+    root_key: "HKLM"
+    path: "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+    values:
+      - name: "MyApp"                      # 监控特定的自启动项
+        type: "string"
+        expect_value: "C:\\Program Files\\MyApp\\app.exe"
+    check_interval: 60                      # 每60秒检查一次
+    execute_on_change: false               # 只记录变化，不执行命令
+
+  # 示例4: 监控环境变量
+  - name: "系统环境变量监控"
+    root_key: "HKLM"
+    path: "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"
+    values:
+      - name: "PATH"
+        type: "expand_string"              # 可扩展字符串类型
+      - name: "JAVA_HOME"
+        type: "string"
+        expect_value: "C:\\Program Files\\Java\\jdk-11"
+    check_interval: 300                    # 每5分钟检查一次
+    execute_on_change: true
+    command: "powershell.exe"
+    args: ["-Command", "Refresh-Environment.ps1"]
+    
+  # 示例5: 监控Windows自动登录配置
+  - name: "Windows自动登录监控"
+    root_key: "HKLM"
+    path: "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
+    values:
+      - name: "AutoAdminLogon"
+        type: "string"
+        expect_value: "1"                  # 1表示启用自动登录
+      - name: "DefaultUserName"
+        type: "string"
+        # 不设置expect_value，只监控变化
+      - name: "DefaultPassword"
+        type: "string"
+        # 不设置expect_value，只监控变化
+      - name: "DefaultDomainName"
+        type: "string"
+        # 不设置expect_value，只监控变化
+    check_interval: 60                     # 每60秒检查一次
+    execute_on_change: true                # 值变化时执行命令
+    command: "powershell.exe"
+    args:
+      - "-ExecutionPolicy"
+      - "Bypass"
+      - "-Command"
+      - "Send-MailMessage -To 'admin@example.com' -From 'system@example.com' -Subject 'Windows自动登录配置已更改' -Body ('检测到自动登录配置变更，变更的值: ' + $env:CHANGED_VALUES) -SmtpServer 'smtp.example.com'"
+
+# 注册表监控功能说明：
+# values 配置项定义了要监控的注册表值：
+# - name: 值名称
+# - type: 值类型（支持 string, expand_string, binary, dword, multi_string, qword）
+# - expect_value: 期望值（可选，用于验证值是否符合预期）
+#
+# execute_on_change: 控制是否在值变化时执行命令
+# - true: 值变化时执行指定的命令
+# - false: 只记录变化，不执行命令
+#
+# 环境变量传递：
+# 当配置了命令执行时，以下环境变量会传递给命令：
+# - CHANGED_VALUES: 发生变化的值名称列表（逗号分隔）
+# - EXPECT_VALUE_MATCH: 是否所有变化的值都匹配期望值（true/false）
+#
+# 使用场景：
+# - 监控系统关键设置（如代理、防火墙、安全策略）
+# - 检测配置文件变化
+# - 监控自启动项变化
+# - 监控环境变量变化
+
 # 重启命令和工作目录功能说明：
 # restart_command 配置项用于指定重启时使用的可执行文件路径
 # - 如果未指定，将使用原始的 name 字段指定的程序

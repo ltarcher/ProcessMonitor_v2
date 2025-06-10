@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -128,7 +129,8 @@ func (hook *ConsoleHook) Levels() []logrus.Level {
 
 // Config represents the configuration structure
 type Config struct {
-	Processes []ProcessConfig `yaml:"processes"`
+	Processes        []ProcessConfig   `yaml:"processes"`
+	RegistryMonitors []RegistryMonitor `yaml:"registry_monitors"`
 }
 
 // ProcessConfig represents the configuration for a single process
@@ -530,9 +532,21 @@ func main() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
+	// WaitGroup for registry monitors
+	var wg sync.WaitGroup
+
 	// Start monitoring each process
 	for _, processConfig := range config.Processes {
 		go monitorProcess(processConfig, ctx)
+	}
+
+	// Start registry monitoring (Windows only)
+	if runtime.GOOS == "windows" && len(config.RegistryMonitors) > 0 {
+		logrus.Infof("Starting registry monitoring for %d registry keys", len(config.RegistryMonitors))
+		for _, regConfig := range config.RegistryMonitors {
+			wg.Add(1)
+			go MonitorRegistry(regConfig, ctx, &wg)
+		}
 	}
 
 	// Wait for termination signal
