@@ -19,7 +19,7 @@ import (
 
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // LogRotator handles log file rotation
@@ -136,9 +136,10 @@ type Config struct {
 // ProcessConfig represents the configuration for a single process
 type ProcessConfig struct {
 	Name             string   `yaml:"name"`
+	Enable           bool     `yaml:"enable"` // 新增：是否启用此监控配置
 	Args             []string `yaml:"args"`
-	RestartCommand   string   `yaml:"restart_command"` // 新增：重启时使用的程序路径
-	WorkDir          string   `yaml:"work_dir"`        // 新增：程序的工作目录
+	RestartCommand   string   `yaml:"restart_command"` // 重启时使用的程序路径
+	WorkDir          string   `yaml:"work_dir"`        // 程序的工作目录
 	Ports            []int    `yaml:"ports"`
 	HealthChecks     []string `yaml:"health_checks"`
 	CheckInterval    int      `yaml:"check_interval"`
@@ -348,9 +349,15 @@ func monitorProcess(config ProcessConfig, ctx context.Context) {
 					logrus.Warnf("Managed process %s (PID: %d) has exited", config.Name, currentCmd.Process.Pid)
 					needRestart = true
 				} else {
-					// Process seems to be running
-					processRunning = true
-					logrus.Debugf("Process %s (PID: %d) is running", config.Name, currentCmd.Process.Pid)
+					// 即使 ProcessState 显示进程在运行，也通过名称再次检查
+					running, _ := isProcessRunning(config.Name)
+					if !running {
+						logrus.Warnf("Process %s (PID: %d) was manually closed", config.Name, currentCmd.Process.Pid)
+						needRestart = true
+					} else {
+						processRunning = true
+						logrus.Debugf("Process %s (PID: %d) is running", config.Name, currentCmd.Process.Pid)
+					}
 				}
 			} else {
 				// No current command, check if process exists by name
@@ -483,6 +490,22 @@ done`, os.Args[0])
 	return ioutil.WriteFile(scriptName, []byte(scriptContent), 0755)
 }
 
+// loadConfig loads the configuration from the specified file
+func loadConfig(configFile string) (Config, error) {
+	var config Config
+
+	data, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		return config, fmt.Errorf("error reading config file: %v", err)
+	}
+
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return config, fmt.Errorf("error parsing config: %v", err)
+	}
+
+	return config, nil
+}
+
 func main() {
 	// Parse command line flags
 	configFile := flag.String("config", "config.yaml", "path to config file")
@@ -499,14 +522,16 @@ func main() {
 	}
 
 	// Load configuration
-	data, err := ioutil.ReadFile(*configFile)
+	config, err := loadConfig(*configFile)
 	if err != nil {
-		logrus.Fatalf("Error reading config file: %v", err)
+		logrus.Fatalf("Error loading config: %v", err)
 	}
 
-	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		logrus.Fatalf("Error parsing config: %v", err)
+	// 向后兼容处理：如果没有指定 enable 字段，默认为 true
+	for i := range config.Processes {
+		if !config.Processes[i].Enable {
+			config.Processes[i].Enable = true
+		}
 	}
 
 	// Set up context for graceful shutdown
@@ -554,6 +579,11 @@ func main() {
 
 	// Start monitoring each process
 	for _, processConfig := range config.Processes {
+		// 检查是否启用此配置
+		if !processConfig.Enable {
+			logrus.Infof("Skipping disabled process monitor: %s", processConfig.Name)
+			continue
+		}
 		go monitorProcess(processConfig, ctx)
 	}
 

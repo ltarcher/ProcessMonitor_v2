@@ -4,6 +4,7 @@
 # 进程监控配置
 processes:
   - name: "notepad.exe"                # 要监控的进程名称
+    enable: true                       # 是否启用此监控配置（可选，默认为true）
     args: []                           # 启动进程的参数
     restart_command: "notepad.exe"     # 重启时使用的命令（可选，默认使用name）
     work_dir: "C:\\Windows\\System32"                       # 工作目录（可选）
