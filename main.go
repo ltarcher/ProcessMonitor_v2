@@ -534,6 +534,13 @@ func main() {
 		}
 	}
 
+	// 注册表监控也添加向后兼容处理
+	for i := range config.RegistryMonitors {
+		if !config.RegistryMonitors[i].Enable {
+			config.RegistryMonitors[i].Enable = true
+		}
+	}
+
 	// Set up context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -589,8 +596,19 @@ func main() {
 
 	// Start registry monitoring (Windows only)
 	if runtime.GOOS == "windows" && len(config.RegistryMonitors) > 0 {
-		logrus.Infof("Starting registry monitoring for %d registry keys", len(config.RegistryMonitors))
+		enabledCount := 0
 		for _, regConfig := range config.RegistryMonitors {
+			if regConfig.Enable {
+				enabledCount++
+			}
+		}
+		logrus.Infof("Starting registry monitoring for %d registry keys (%d enabled)", len(config.RegistryMonitors), enabledCount)
+
+		for _, regConfig := range config.RegistryMonitors {
+			if !regConfig.Enable {
+				logrus.Infof("Skipping disabled registry monitor: %s", regConfig.Name)
+				continue
+			}
 			wg.Add(1)
 			go MonitorRegistry(regConfig, ctx, &wg)
 		}

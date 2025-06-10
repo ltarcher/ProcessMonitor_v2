@@ -24,6 +24,7 @@ type RegistryValueConfig struct {
 // RegistryMonitor represents the configuration for a registry key monitor
 type RegistryMonitor struct {
 	Name            string                `yaml:"name"`              // 监控名称
+	Enable          bool                  `yaml:"enable"`            // 是否启用此监控配置（可选，默认为true）
 	RootKey         string                `yaml:"root_key"`          // 根键名称 (HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER, etc.)
 	Path            string                `yaml:"path"`              // 注册表路径
 	Values          []RegistryValueConfig `yaml:"values"`            // 要监控的值配置

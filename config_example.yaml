@@ -99,6 +99,7 @@ processes:
 registry_monitors:
   # 示例1: 监控系统代理设置
   - name: "系统代理监控"
+    enable: true                            # 是否启用此监控配置（可选，默认为true）
     root_key: "HKCU"                        # HKEY_CURRENT_USER
     path: "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"
     values:                                 # 要监控的值列表
@@ -133,6 +134,7 @@ registry_monitors:
 
   # 示例3: 监控自启动项
   - name: "自启动项监控"
+    enable: false                           # 禁用此监控配置
     root_key: "HKLM"
     path: "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
     values:
