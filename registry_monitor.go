@@ -69,22 +69,13 @@ func compareValues(actual interface{}, expect interface{}, valueType string) boo
 	// 根据值类型进行比较
 	switch strings.ToLower(valueType) {
 	case "string", "expand_string":
-		// 直接比较字符串值
-		actualStr, actualIsStr := actual.(string)
-		expectStr, expectIsStr := expect.(string)
+		// 强制转换为字符串比较
+		actualStr := fmt.Sprintf("%v", actual)
+		expectStr := fmt.Sprintf("%v", expect)
 
-		// 如果都是字符串类型，直接比较
-		if actualIsStr && expectIsStr {
-			logrus.Infof("String comparison - Actual: %s, Expected: %s", actualStr, expectStr)
-			return actualStr == expectStr
-		}
-
-		// 类型不匹配时回退到字符串转换比较
-		actualStrFallback := fmt.Sprintf("%v", actual)
-		expectStrFallback := fmt.Sprintf("%v", expect)
-		logrus.Warnf("Type mismatch in string comparison. Actual type: %T, Expected type: %T", actual, expect)
-		logrus.Infof("Fallback string comparison - Actual: %s, Expected: %s", actualStrFallback, expectStrFallback)
-		return actualStrFallback == expectStrFallback
+		// 记录比较详情
+		logrus.Infof("String comparison (forced) - Actual: %s, Expected: %s", actualStr, expectStr)
+		return actualStr == expectStr
 
 	case "dword", "qword":
 		// 处理数值类型
@@ -291,6 +282,7 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 		}
 
 		// 读取值和类型
+		logrus.Debugf("Reading registry value: %s\\%s\\%s", config.RootKey, config.Path, valueConfig.Name)
 		val, valType, err := k.GetValue(valueConfig.Name, nil)
 		if err != nil {
 			// 如果值不存在且有期望值，则设置期望值
@@ -312,13 +304,13 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 
 		// 检查类型是否匹配
 		if uint32(valType) != expectedType {
-			logrus.Warnf("Value type mismatch for %s: expected %d, got %d",
-				valueConfig.Name, expectedType, valType)
+			logrus.Warnf("Value type mismatch for %s: expected %d, got %d (value: %v)",
+				valueConfig.Name, expectedType, valType, val)
 			continue
 		}
 		valueMap[valueConfig.Name] = val
 		valueTypeMap[valueConfig.Name] = valueConfig.Type
-		logrus.Debugf("Initial registry value %s = %v", valueConfig.Name, val)
+		logrus.Infof("Initial registry value %s = %v (type: %s)", valueConfig.Name, val, valueConfig.Type)
 	}
 
 	ticker := time.NewTicker(time.Duration(config.CheckInterval) * time.Second)
