@@ -381,95 +381,79 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 				}
 
 				// 检查类型是否匹配
-				if uint32(valType) != expectedType {
+				typeMismatch := uint32(valType) != expectedType
+				if typeMismatch {
 					logrus.Warnf("Value type mismatch for %s: expected %d, got %d",
 						valueConfig.Name, expectedType, valType)
-					continue
 				}
-				logrus.Debugf("Raw registry value - Name: %s, Type: %d, Value: %v", valueConfig.Name, valType, val)
 
-				// 比较值
+				// 比较值与期望值
 				oldVal, exists := valueMap[valueConfig.Name]
-				// 增强日志输出，显示值类型和内容
-				logrus.Infof("Registry value changed - Key: %s\\%s\\%s, Type: %s, Old: %v (%T), New: %v (%T)",
+				valueMismatch := !exists || !compareValues(oldVal, val, valueConfig.Type)
+
+				// 增强日志输出
+				logrus.Infof("Registry value check - Key: %s\\%s\\%s, Type: %s, Old: %v (%T), New: %v (%T), TypeMatch: %v, ValueMatch: %v",
 					config.RootKey, config.Path, valueConfig.Name, valueConfig.Type,
-					oldVal, oldVal, val, val)
-				if !exists || !compareValues(oldVal, val, valueConfig.Type) {
-					valueMap[valueConfig.Name] = val
+					oldVal, oldVal, val, val, !typeMismatch, !valueMismatch)
+
+				// 只要类型或值不匹配，就更新为期望值
+				if valueConfig.ExpectValue != nil && (typeMismatch || valueMismatch) {
+					hasExpectValueMismatch = true
 					changed = true
 					changedValues = append(changedValues, valueConfig.Name)
 
-					// 检查是否与期望值匹配
-					if valueConfig.ExpectValue != nil {
-						if !compareValues(val, valueConfig.ExpectValue, valueConfig.Type) {
-							logrus.Warnf("Value %s does not match expected value. Got: %v (%T), Expected: %v (%T)",
-								valueConfig.Name, val, val, valueConfig.ExpectValue, valueConfig.ExpectValue)
-							hasExpectValueMismatch = true
+					logrus.Warnf("Value %s does not match expected (TypeMatch: %v, ValueMatch: %v). Got: %v (%T), Expected: %v (%T)",
+						valueConfig.Name, !typeMismatch, !valueMismatch,
+						val, val, valueConfig.ExpectValue, valueConfig.ExpectValue)
 
-							// 立即恢复期望值，带重试机制
-							var lastErr error
-							for attempt := 1; attempt <= 3; attempt++ {
-								k.Close()
-								logrus.Debugf("Attempt %d: Opening key for writing with SET_VALUE permission", attempt)
-								k, err = registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE|registry.SET_VALUE)
-								if err != nil {
-									lastErr = fmt.Errorf("failed to open key for writing (attempt %d): %v", attempt, err)
-									logrus.Error(lastErr)
-									time.Sleep(100 * time.Millisecond)
-									continue
-								}
-
-								logrus.Debugf("Attempt %d: Restoring value %s to %v", attempt, valueConfig.Name, valueConfig.ExpectValue)
-								if err := setRegistryValue(k, valueConfig.Name, valueConfig.Type, valueConfig.ExpectValue); err != nil {
-									lastErr = fmt.Errorf("failed to restore value (attempt %d): %v", attempt, err)
-									logrus.Error(lastErr)
-									k.Close()
-									time.Sleep(100 * time.Millisecond)
-									continue
-								}
-
-								// 验证恢复是否成功
-								val, _, err := k.GetValue(valueConfig.Name, nil)
-								if err != nil || !compareValues(val, valueConfig.ExpectValue, valueConfig.Type) {
-									lastErr = fmt.Errorf("verification failed after restore (attempt %d): %v", attempt, err)
-									logrus.Error(lastErr)
-									k.Close()
-									time.Sleep(100 * time.Millisecond)
-									continue
-								}
-
-								// 恢复成功
-								valueMap[valueConfig.Name] = valueConfig.ExpectValue
-								logrus.Infof("Successfully restored expected value for %s (attempt %d)", valueConfig.Name, attempt)
-								lastErr = nil
-								break
-							}
-
-							if lastErr != nil {
-								// 尝试使用ALL_ACCESS作为最后手段
-								k.Close()
-								logrus.Warnf("Trying ALL_ACCESS as last resort")
-								k, err = registry.OpenKey(rootKey, config.Path, registry.ALL_ACCESS)
-								if err == nil {
-									if err := setRegistryValue(k, valueConfig.Name, valueConfig.Type, valueConfig.ExpectValue); err == nil {
-										valueMap[valueConfig.Name] = valueConfig.ExpectValue
-										logrus.Infof("Successfully restored with ALL_ACCESS")
-										lastErr = nil
-									}
-								}
-							}
-
-							k.Close()
-							logrus.Debugf("Reopening key for monitoring")
-							k, err = registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE|registry.NOTIFY)
-							if err != nil {
-								logrus.Errorf("Failed to reopen registry key after writing: %v", err)
-								continue
-							}
-							logrus.Debugf("Successfully reopened key for monitoring")
-						} else {
-							logrus.Infof("Value %s matches expected value: %v", valueConfig.Name, val)
+					// 立即恢复期望值，带重试机制
+					var lastErr error
+					for attempt := 1; attempt <= 3; attempt++ {
+						k.Close()
+						k, err = registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE|registry.SET_VALUE)
+						if err != nil {
+							lastErr = fmt.Errorf("failed to open key for writing (attempt %d): %v", attempt, err)
+							logrus.Error(lastErr)
+							time.Sleep(100 * time.Millisecond)
+							continue
 						}
+
+						if err := setRegistryValue(k, valueConfig.Name, valueConfig.Type, valueConfig.ExpectValue); err != nil {
+							lastErr = fmt.Errorf("failed to restore value (attempt %d): %v", attempt, err)
+							logrus.Error(lastErr)
+							k.Close()
+							time.Sleep(100 * time.Millisecond)
+							continue
+						}
+
+						// 验证恢复是否成功
+						val, _, err := k.GetValue(valueConfig.Name, nil)
+						if err == nil && !typeMismatch && compareValues(val, valueConfig.ExpectValue, valueConfig.Type) {
+							valueMap[valueConfig.Name] = valueConfig.ExpectValue
+							logrus.Infof("Successfully restored expected value for %s (attempt %d)", valueConfig.Name, attempt)
+							lastErr = nil
+							break
+						}
+					}
+
+					if lastErr != nil {
+						// 尝试使用ALL_ACCESS作为最后手段
+						k.Close()
+						k, err = registry.OpenKey(rootKey, config.Path, registry.ALL_ACCESS)
+						if err == nil {
+							if err := setRegistryValue(k, valueConfig.Name, valueConfig.Type, valueConfig.ExpectValue); err == nil {
+								valueMap[valueConfig.Name] = valueConfig.ExpectValue
+								logrus.Infof("Successfully restored with ALL_ACCESS")
+								lastErr = nil
+							}
+						}
+					}
+
+					k.Close()
+					k, err = registry.OpenKey(rootKey, config.Path, registry.QUERY_VALUE|registry.NOTIFY)
+					if err != nil {
+						logrus.Errorf("Failed to reopen registry key after writing: %v", err)
+						continue
 					}
 				}
 			}
