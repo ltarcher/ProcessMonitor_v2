@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -72,54 +73,100 @@ func compareValues(actual interface{}, expect interface{}, valueType string) boo
 		// 强制转换为字符串比较
 		actualStr := fmt.Sprintf("%v", actual)
 		expectStr := fmt.Sprintf("%v", expect)
-
-		// 记录比较详情
-		logrus.Infof("String comparison (forced) - Actual: %s, Expected: %s", actualStr, expectStr)
+		logrus.Infof("String comparison - Actual: %s, Expected: %s", actualStr, expectStr)
 		return actualStr == expectStr
 
-	case "dword", "qword":
-		// 处理数值类型
-		actualNum, ok1 := actual.(uint64)
-		if !ok1 {
-			if temp, ok := actual.(uint32); ok {
-				actualNum = uint64(temp)
-			} else {
-				return false
-			}
+	case "dword":
+		// 转换actual为uint32
+		actualNum, err := convertToUint32(actual)
+		if err != nil {
+			logrus.Warnf("Failed to convert actual value to uint32: %v", err)
+			return false
 		}
+		// 转换expect为uint32
+		expectNum, err := convertToUint32(expect)
+		if err != nil {
+			logrus.Warnf("Failed to convert expected value to uint32: %v", err)
+			return false
+		}
+		return actualNum == expectNum
 
-		var expectNum uint64
-		switch v := expect.(type) {
-		case int:
-			expectNum = uint64(v)
-		case int64:
-			expectNum = uint64(v)
-		case uint:
-			expectNum = uint64(v)
-		case uint64:
-			expectNum = v
-		default:
+	case "qword":
+		// 转换actual为uint64
+		actualNum, err := convertToUint64(actual)
+		if err != nil {
+			logrus.Warnf("Failed to convert actual value to uint64: %v", err)
+			return false
+		}
+		// 转换expect为uint64
+		expectNum, err := convertToUint64(expect)
+		if err != nil {
+			logrus.Warnf("Failed to convert expected value to uint64: %v", err)
 			return false
 		}
 		return actualNum == expectNum
 
 	case "binary":
-		actualBytes, ok1 := actual.([]byte)
-		expectBytes, ok2 := expect.([]byte)
-		if !ok1 || !ok2 {
-			return false
+		// 处理二进制数据
+		var actualBytes, expectBytes []byte
+		var ok bool
+
+		if actualBytes, ok = actual.([]byte); !ok {
+			if str, ok := actual.(string); ok {
+				actualBytes = []byte(str)
+			} else {
+				return false
+			}
 		}
+
+		if expectBytes, ok = expect.([]byte); !ok {
+			if str, ok := expect.(string); ok {
+				expectBytes = []byte(str)
+			} else {
+				return false
+			}
+		}
+
 		return bytes.Equal(actualBytes, expectBytes)
 
 	case "multi_string":
-		actualStrings, ok1 := actual.([]string)
-		expectStrings, ok2 := expect.([]string)
-		if !ok1 || !ok2 {
+		// 处理多字符串
+		var actualStrings, expectStrings []string
+
+		// 转换actual到字符串数组
+		switch v := actual.(type) {
+		case []string:
+			actualStrings = v
+		case string:
+			actualStrings = []string{v}
+		case []interface{}:
+			actualStrings = make([]string, len(v))
+			for i, item := range v {
+				actualStrings[i] = fmt.Sprintf("%v", item)
+			}
+		default:
 			return false
 		}
+
+		// 转换expect到字符串数组
+		switch v := expect.(type) {
+		case []string:
+			expectStrings = v
+		case string:
+			expectStrings = []string{v}
+		case []interface{}:
+			expectStrings = make([]string, len(v))
+			for i, item := range v {
+				expectStrings[i] = fmt.Sprintf("%v", item)
+			}
+		default:
+			return false
+		}
+
 		if len(actualStrings) != len(expectStrings) {
 			return false
 		}
+
 		for i := range actualStrings {
 			if actualStrings[i] != expectStrings[i] {
 				return false
@@ -147,6 +194,94 @@ func getRootKey(rootKeyName string) (registry.Key, error) {
 		return registry.CURRENT_CONFIG, nil
 	default:
 		return 0, fmt.Errorf("unknown root key: %s", rootKeyName)
+	}
+}
+
+// convertToUint32 尝试将任意值转换为uint32
+func convertToUint32(val interface{}) (uint32, error) {
+	if val == nil {
+		return 0, fmt.Errorf("cannot convert nil to uint32")
+	}
+
+	switch v := val.(type) {
+	case uint32:
+		return v, nil
+	case int:
+		return uint32(v), nil
+	case int32:
+		return uint32(v), nil
+	case int64:
+		return uint32(v), nil
+	case uint:
+		return uint32(v), nil
+	case uint64:
+		return uint32(v), nil
+	case float32:
+		return uint32(v), nil
+	case float64:
+		return uint32(v), nil
+	case string:
+		var num uint64
+		if _, err := fmt.Sscanf(v, "%d", &num); err == nil {
+			return uint32(num), nil
+		}
+		return 0, fmt.Errorf("cannot convert string '%s' to uint32", v)
+	default:
+		// 尝试使用反射
+		rv := reflect.ValueOf(val)
+		switch rv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return uint32(rv.Int()), nil
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			return uint32(rv.Uint()), nil
+		case reflect.Float32, reflect.Float64:
+			return uint32(rv.Float()), nil
+		}
+		return 0, fmt.Errorf("cannot convert %T to uint32", val)
+	}
+}
+
+// convertToUint64 尝试将任意值转换为uint64
+func convertToUint64(val interface{}) (uint64, error) {
+	if val == nil {
+		return 0, fmt.Errorf("cannot convert nil to uint64")
+	}
+
+	switch v := val.(type) {
+	case uint64:
+		return v, nil
+	case int:
+		return uint64(v), nil
+	case int32:
+		return uint64(v), nil
+	case int64:
+		return uint64(v), nil
+	case uint:
+		return uint64(v), nil
+	case uint32:
+		return uint64(v), nil
+	case float32:
+		return uint64(v), nil
+	case float64:
+		return uint64(v), nil
+	case string:
+		var num uint64
+		if _, err := fmt.Sscanf(v, "%d", &num); err == nil {
+			return num, nil
+		}
+		return 0, fmt.Errorf("cannot convert string '%s' to uint64", v)
+	default:
+		// 尝试使用反射
+		rv := reflect.ValueOf(val)
+		switch rv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return uint64(rv.Int()), nil
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			return rv.Uint(), nil
+		case reflect.Float32, reflect.Float64:
+			return uint64(rv.Float()), nil
+		}
+		return 0, fmt.Errorf("cannot convert %T to uint64", val)
 	}
 }
 
@@ -182,42 +317,16 @@ func setRegistryValue(k registry.Key, name string, valueType string, value inter
 		return k.SetBinaryValue(name, byteValue)
 
 	case "dword":
-		var dwordValue uint32
-		switch v := value.(type) {
-		case int:
-			dwordValue = uint32(v)
-		case int64:
-			dwordValue = uint32(v)
-		case uint:
-			dwordValue = uint32(v)
-		case uint32:
-			dwordValue = v
-		case uint64:
-			dwordValue = uint32(v)
-		case float64:
-			dwordValue = uint32(v)
-		default:
-			return fmt.Errorf("value cannot be converted to DWORD")
+		dwordValue, err := convertToUint32(value)
+		if err != nil {
+			return fmt.Errorf("failed to convert value to DWORD: %v", err)
 		}
 		return k.SetDWordValue(name, dwordValue)
 
 	case "qword":
-		var qwordValue uint64
-		switch v := value.(type) {
-		case int:
-			qwordValue = uint64(v)
-		case int64:
-			qwordValue = uint64(v)
-		case uint:
-			qwordValue = uint64(v)
-		case uint32:
-			qwordValue = uint64(v)
-		case uint64:
-			qwordValue = v
-		case float64:
-			qwordValue = uint64(v)
-		default:
-			return fmt.Errorf("value cannot be converted to QWORD")
+		qwordValue, err := convertToUint64(value)
+		if err != nil {
+			return fmt.Errorf("failed to convert value to QWORD: %v", err)
 		}
 		return k.SetQWordValue(name, qwordValue)
 
@@ -303,11 +412,45 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 		}
 
 		// 检查类型是否匹配
-		if uint32(valType) != expectedType {
+		typeMismatch := uint32(valType) != expectedType
+		if typeMismatch {
 			logrus.Warnf("Value type mismatch for %s: expected %d, got %d (value: %v)",
 				valueConfig.Name, expectedType, valType, val)
+		}
+
+		// 根据类型处理值
+		switch strings.ToLower(valueConfig.Type) {
+		case "string", "expand_string":
+			// 字符串类型统一转换为字符串格式
+			strVal := fmt.Sprintf("%v", val)
+			valueMap[valueConfig.Name] = strVal
+			valueTypeMap[valueConfig.Name] = valueConfig.Type
+			logrus.Infof("Initial registry value %s = %v (type: %s)", valueConfig.Name, strVal, valueConfig.Type)
+			continue
+		case "dword":
+			// 使用convertToUint32处理DWORD类型
+			num, err := convertToUint32(val)
+			if err != nil {
+				logrus.Warnf("Failed to convert DWORD value %s: %v", valueConfig.Name, err)
+				continue
+			}
+			valueMap[valueConfig.Name] = num
+			valueTypeMap[valueConfig.Name] = valueConfig.Type
+			logrus.Infof("Initial registry value %s = %v (type: %s)", valueConfig.Name, num, valueConfig.Type)
+			continue
+		case "qword":
+			// 使用convertToUint64处理QWORD类型
+			num, err := convertToUint64(val)
+			if err != nil {
+				logrus.Warnf("Failed to convert QWORD value %s: %v", valueConfig.Name, err)
+				continue
+			}
+			valueMap[valueConfig.Name] = num
+			valueTypeMap[valueConfig.Name] = valueConfig.Type
+			logrus.Infof("Initial registry value %s = %v (type: %s)", valueConfig.Name, num, valueConfig.Type)
 			continue
 		}
+
 		valueMap[valueConfig.Name] = val
 		valueTypeMap[valueConfig.Name] = valueConfig.Type
 		logrus.Infof("Initial registry value %s = %v (type: %s)", valueConfig.Name, val, valueConfig.Type)
