@@ -69,27 +69,14 @@ func compareValues(actual interface{}, expect interface{}, valueType string) boo
 	// 根据值类型进行比较
 	switch strings.ToLower(valueType) {
 	case "string", "expand_string":
-		// 尝试将实际值转换为string
-		var actualStr string
-		switch v := actual.(type) {
-		case string:
-			actualStr = v
-		case int, int32, int64, uint, uint32, uint64:
-			actualStr = fmt.Sprintf("%d", v)
-		default:
-			return false
-		}
+		// 统一转换为字符串进行比较
+		actualStr := fmt.Sprintf("%v", actual) // 使用%v格式化任何类型
+		expectStr := fmt.Sprintf("%v", expect)
 
-		// 尝试将期望值转换为string
-		var expectStr string
-		switch v := expect.(type) {
-		case string:
-			expectStr = v
-		case int, int32, int64, uint, uint32, uint64:
-			expectStr = fmt.Sprintf("%d", v)
-		default:
-			return false
-		}
+		// 增强日志输出
+		logrus.Infof("String comparison - Actual: %v (%T) -> %s, Expected: %v (%T) -> %s",
+			actual, actual, actualStr,
+			expect, expect, expectStr)
 
 		return actualStr == expectStr
 
