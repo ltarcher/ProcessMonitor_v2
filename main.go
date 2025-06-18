@@ -603,7 +603,7 @@ func main() {
 	defer logRotator.Close()
 
 	logrus.SetOutput(logRotator)
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 	logrus.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})

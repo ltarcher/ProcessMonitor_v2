@@ -15,6 +15,38 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+// getRegistryTypeDescription 返回注册表值类型的字符串描述
+func getRegistryTypeDescription(valType uint32) string {
+	switch valType {
+	case registry.NONE:
+		return "NONE"
+	case registry.SZ:
+		return "SZ (String)"
+	case registry.EXPAND_SZ:
+		return "EXPAND_SZ (Expandable String)"
+	case registry.BINARY:
+		return "BINARY (Binary Data)"
+	case registry.DWORD:
+		return "DWORD (32-bit Number)"
+	case registry.DWORD_BIG_ENDIAN:
+		return "DWORD_BIG_ENDIAN (32-bit Big Endian)"
+	case registry.LINK:
+		return "LINK (Symbolic Link)"
+	case registry.MULTI_SZ:
+		return "MULTI_SZ (Multiple String)"
+	case registry.RESOURCE_LIST:
+		return "RESOURCE_LIST"
+	case registry.FULL_RESOURCE_DESCRIPTOR:
+		return "FULL_RESOURCE_DESCRIPTOR"
+	case registry.RESOURCE_REQUIREMENTS_LIST:
+		return "RESOURCE_REQUIREMENTS_LIST"
+	case registry.QWORD:
+		return "QWORD (64-bit Number)"
+	default:
+		return fmt.Sprintf("UNKNOWN (%d)", valType)
+	}
+}
+
 // RegistryValueConfig 表示单个注册表值的监控配置
 type RegistryValueConfig struct {
 	Name        string      `yaml:"name"`         // 值名称
@@ -111,23 +143,32 @@ func compareValues(actual interface{}, expect interface{}, valueType string) boo
 		var actualBytes, expectBytes []byte
 		var ok bool
 
+		logrus.Debugf("Binary comparison - Converting actual value type: %T", actual)
 		if actualBytes, ok = actual.([]byte); !ok {
 			if str, ok := actual.(string); ok {
 				actualBytes = []byte(str)
+				logrus.Debugf("Converted actual string to bytes, length: %d", len(actualBytes))
 			} else {
+				logrus.Debugf("Failed to convert actual value to binary: %v (%T)", actual, actual)
 				return false
 			}
 		}
 
+		logrus.Debugf("Binary comparison - Converting expected value type: %T", expect)
 		if expectBytes, ok = expect.([]byte); !ok {
 			if str, ok := expect.(string); ok {
 				expectBytes = []byte(str)
+				logrus.Debugf("Converted expected string to bytes, length: %d", len(expectBytes))
 			} else {
+				logrus.Debugf("Failed to convert expected value to binary: %v (%T)", expect, expect)
 				return false
 			}
 		}
 
-		return bytes.Equal(actualBytes, expectBytes)
+		result := bytes.Equal(actualBytes, expectBytes)
+		logrus.Debugf("Binary comparison result: %v (Actual length: %d, Expected length: %d)",
+			result, len(actualBytes), len(expectBytes))
+		return result
 
 	case "multi_string":
 		// 处理多字符串
@@ -199,88 +240,133 @@ func getRootKey(rootKeyName string) (registry.Key, error) {
 
 // convertToUint32 尝试将任意值转换为uint32
 func convertToUint32(val interface{}) (uint32, error) {
+	logrus.Debugf("Converting to uint32 - Input: %v (%T)", val, val)
+
 	if val == nil {
+		logrus.Debug("Cannot convert nil to uint32")
 		return 0, fmt.Errorf("cannot convert nil to uint32")
 	}
 
 	switch v := val.(type) {
 	case uint32:
+		logrus.Debugf("Direct uint32 value: %d", v)
 		return v, nil
 	case int:
+		logrus.Debugf("Converting from int: %d to uint32", v)
 		return uint32(v), nil
 	case int32:
+		logrus.Debugf("Converting from int32: %d to uint32", v)
 		return uint32(v), nil
 	case int64:
+		logrus.Debugf("Converting from int64: %d to uint32", v)
 		return uint32(v), nil
 	case uint:
+		logrus.Debugf("Converting from uint: %d to uint32", v)
 		return uint32(v), nil
 	case uint64:
+		logrus.Debugf("Converting from uint64: %d to uint32", v)
 		return uint32(v), nil
 	case float32:
+		logrus.Debugf("Converting from float32: %f to uint32", v)
 		return uint32(v), nil
 	case float64:
+		logrus.Debugf("Converting from float64: %f to uint32", v)
 		return uint32(v), nil
 	case string:
+		logrus.Debugf("Converting from string: '%s' to uint32", v)
 		var num uint64
 		if _, err := fmt.Sscanf(v, "%d", &num); err == nil {
-			return uint32(num), nil
+			result := uint32(num)
+			logrus.Debugf("Successfully converted string to uint32: %d", result)
+			return result, nil
 		}
+		logrus.Debugf("Failed to convert string '%s' to uint32", v)
 		return 0, fmt.Errorf("cannot convert string '%s' to uint32", v)
 	default:
+		logrus.Debugf("Attempting to convert %T using reflection", val)
 		// 尝试使用反射
 		rv := reflect.ValueOf(val)
 		switch rv.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			return uint32(rv.Int()), nil
+			result := uint32(rv.Int())
+			logrus.Debugf("Converted from reflected integer: %d", result)
+			return result, nil
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-			return uint32(rv.Uint()), nil
+			result := uint32(rv.Uint())
+			logrus.Debugf("Converted from reflected unsigned integer: %d", result)
+			return result, nil
 		case reflect.Float32, reflect.Float64:
-			return uint32(rv.Float()), nil
+			result := uint32(rv.Float())
+			logrus.Debugf("Converted from reflected float: %d", result)
+			return result, nil
 		}
+		logrus.Debugf("Failed to convert type %T to uint32", val)
 		return 0, fmt.Errorf("cannot convert %T to uint32", val)
 	}
 }
 
 // convertToUint64 尝试将任意值转换为uint64
 func convertToUint64(val interface{}) (uint64, error) {
+	logrus.Debugf("Converting to uint64 - Input: %v (%T)", val, val)
+
 	if val == nil {
+		logrus.Debug("Cannot convert nil to uint64")
 		return 0, fmt.Errorf("cannot convert nil to uint64")
 	}
 
 	switch v := val.(type) {
 	case uint64:
+		logrus.Debugf("Direct uint64 value: %d", v)
 		return v, nil
 	case int:
+		logrus.Debugf("Converting from int: %d to uint64", v)
 		return uint64(v), nil
 	case int32:
+		logrus.Debugf("Converting from int32: %d to uint64", v)
 		return uint64(v), nil
 	case int64:
+		logrus.Debugf("Converting from int64: %d to uint64", v)
 		return uint64(v), nil
 	case uint:
+		logrus.Debugf("Converting from uint: %d to uint64", v)
 		return uint64(v), nil
 	case uint32:
+		logrus.Debugf("Converting from uint32: %d to uint64", v)
 		return uint64(v), nil
 	case float32:
+		logrus.Debugf("Converting from float32: %f to uint64", v)
 		return uint64(v), nil
 	case float64:
+		logrus.Debugf("Converting from float64: %f to uint64", v)
 		return uint64(v), nil
 	case string:
+		logrus.Debugf("Converting from string: '%s' to uint64", v)
 		var num uint64
 		if _, err := fmt.Sscanf(v, "%d", &num); err == nil {
+			logrus.Debugf("Successfully converted string to uint64: %d", num)
 			return num, nil
 		}
+		logrus.Debugf("Failed to convert string '%s' to uint64", v)
 		return 0, fmt.Errorf("cannot convert string '%s' to uint64", v)
 	default:
+		logrus.Debugf("Attempting to convert %T using reflection", val)
 		// 尝试使用反射
 		rv := reflect.ValueOf(val)
 		switch rv.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			return uint64(rv.Int()), nil
+			result := uint64(rv.Int())
+			logrus.Debugf("Converted from reflected integer: %d", result)
+			return result, nil
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-			return rv.Uint(), nil
+			result := rv.Uint()
+			logrus.Debugf("Converted from reflected unsigned integer: %d", result)
+			return result, nil
 		case reflect.Float32, reflect.Float64:
-			return uint64(rv.Float()), nil
+			result := uint64(rv.Float())
+			logrus.Debugf("Converted from reflected float: %d", result)
+			return result, nil
 		}
+		logrus.Debugf("Failed to convert type %T to uint64", val)
 		return 0, fmt.Errorf("cannot convert %T to uint64", val)
 	}
 }
