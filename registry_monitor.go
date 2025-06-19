@@ -412,20 +412,67 @@ func convertToUint64(val interface{}) (uint64, error) {
 func setRegistryValue(k registry.Key, name string, valueType string, value interface{}) error {
 	logrus.Debugf("Setting registry value - Name: %s, Type: %s, Value: %v (%T)",
 		name, valueType, value, value)
+
+	var err error
+
 	switch strings.ToLower(valueType) {
 	case "string":
-		strValue, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("value for string type must be string, got %T", value)
+		// 确保值是字符串类型
+		var strValue string
+		switch v := value.(type) {
+		case string:
+			strValue = v
+		case []byte:
+			strValue = string(v)
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			strValue = fmt.Sprintf("%d", v)
+		case float32, float64:
+			strValue = fmt.Sprintf("%v", v)
+		default:
+			strValue = fmt.Sprintf("%v", v)
+			logrus.Warnf("Converting non-standard type %T to string for registry value", v)
 		}
-		return k.SetStringValue(name, strValue)
+		err = k.SetStringValue(name, strValue)
+
+		// 验证设置是否成功
+		if err == nil {
+			readValue, _, readErr := k.GetStringValue(name)
+			if readErr == nil {
+				logrus.Debugf("Verification after setting string value - Name: %s, Set: %s, Read: %s",
+					name, strValue, readValue)
+				if readValue != strValue {
+					logrus.Warnf("String value verification failed - Expected: %s, Got: %s", strValue, readValue)
+				}
+			}
+		}
+		return err
 
 	case "expand_string":
-		strValue, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("value is not a string")
+		// 确保值是字符串类型
+		var strValue string
+		switch v := value.(type) {
+		case string:
+			strValue = v
+		case []byte:
+			strValue = string(v)
+		default:
+			strValue = fmt.Sprintf("%v", v)
+			logrus.Warnf("Converting non-standard type %T to expand_string for registry value", v)
 		}
-		return k.SetExpandStringValue(name, strValue)
+		err = k.SetExpandStringValue(name, strValue)
+
+		// 验证设置是否成功
+		if err == nil {
+			readValue, _, readErr := k.GetStringValue(name)
+			if readErr == nil {
+				logrus.Debugf("Verification after setting expand_string value - Name: %s, Set: %s, Read: %s",
+					name, strValue, readValue)
+				if readValue != strValue {
+					logrus.Warnf("Expand_string value verification failed - Expected: %s, Got: %s", strValue, readValue)
+				}
+			}
+		}
+		return err
 
 	case "binary":
 		var byteValue []byte
@@ -437,21 +484,60 @@ func setRegistryValue(k registry.Key, name string, valueType string, value inter
 		default:
 			return fmt.Errorf("value cannot be converted to binary")
 		}
-		return k.SetBinaryValue(name, byteValue)
+		err = k.SetBinaryValue(name, byteValue)
+
+		// 验证设置是否成功
+		if err == nil {
+			readValue, _, readErr := k.GetBinaryValue(name)
+			if readErr == nil {
+				logrus.Debugf("Verification after setting binary value - Name: %s, Set length: %d, Read length: %d",
+					name, len(byteValue), len(readValue))
+				if !bytes.Equal(readValue, byteValue) {
+					logrus.Warnf("Binary value verification failed - Values don't match")
+				}
+			}
+		}
+		return err
 
 	case "dword":
 		dwordValue, err := convertToUint32(value)
 		if err != nil {
 			return fmt.Errorf("failed to convert value to DWORD: %v", err)
 		}
-		return k.SetDWordValue(name, dwordValue)
+		err = k.SetDWordValue(name, dwordValue)
+
+		// 验证设置是否成功
+		if err == nil {
+			readValue, _, readErr := k.GetIntegerValue(name)
+			if readErr == nil {
+				logrus.Debugf("Verification after setting DWORD value - Name: %s, Set: %d, Read: %d",
+					name, dwordValue, uint32(readValue))
+				if uint32(readValue) != dwordValue {
+					logrus.Warnf("DWORD value verification failed - Expected: %d, Got: %d", dwordValue, uint32(readValue))
+				}
+			}
+		}
+		return err
 
 	case "qword":
 		qwordValue, err := convertToUint64(value)
 		if err != nil {
 			return fmt.Errorf("failed to convert value to QWORD: %v", err)
 		}
-		return k.SetQWordValue(name, qwordValue)
+		err = k.SetQWordValue(name, qwordValue)
+
+		// 验证设置是否成功
+		if err == nil {
+			readValue, _, readErr := k.GetIntegerValue(name)
+			if readErr == nil {
+				logrus.Debugf("Verification after setting QWORD value - Name: %s, Set: %d, Read: %d",
+					name, qwordValue, readValue)
+				if readValue != qwordValue {
+					logrus.Warnf("QWORD value verification failed - Expected: %d, Got: %d", qwordValue, readValue)
+				}
+			}
+		}
+		return err
 
 	case "multi_string":
 		var strValues []string
@@ -472,7 +558,29 @@ func setRegistryValue(k registry.Key, name string, valueType string, value inter
 		default:
 			return fmt.Errorf("value cannot be converted to multi-string")
 		}
-		return k.SetStringsValue(name, strValues)
+		err = k.SetStringsValue(name, strValues)
+
+		// 验证设置是否成功
+		if err == nil {
+			readValue, _, readErr := k.GetStringsValue(name)
+			if readErr == nil {
+				logrus.Debugf("Verification after setting multi_string value - Name: %s, Set length: %d, Read length: %d",
+					name, len(strValues), len(readValue))
+				if len(readValue) != len(strValues) {
+					logrus.Warnf("Multi_string value verification failed - Length mismatch: Expected %d, Got %d",
+						len(strValues), len(readValue))
+				} else {
+					for i := range strValues {
+						if readValue[i] != strValues[i] {
+							logrus.Warnf("Multi_string value verification failed at index %d - Expected: %s, Got: %s",
+								i, strValues[i], readValue[i])
+							break
+						}
+					}
+				}
+			}
+		}
+		return err
 
 	default:
 		return fmt.Errorf("unsupported registry value type: %s", valueType)
@@ -674,56 +782,74 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 				switch strings.ToLower(valueConfig.Type) {
 				case "string":
 					var strVal string
-					strVal, _, err = k.GetStringValue(valueConfig.Name)
+					strVal, valType, err = k.GetStringValue(valueConfig.Name)
 					if err == nil {
 						val = strVal
-						valType = registry.SZ
+						// 验证读取的类型是否匹配
+						if valType != registry.SZ {
+							logrus.Warnf("Registry value type mismatch - Expected: string (SZ), Got: %d", valType)
+						}
 					}
 				case "expand_string":
 					var strVal string
-					strVal, _, err = k.GetStringValue(valueConfig.Name)
+					strVal, valType, err = k.GetStringValue(valueConfig.Name)
 					if err == nil {
 						val = strVal
-						valType = registry.EXPAND_SZ
+						// 验证读取的类型是否匹配
+						if valType != registry.EXPAND_SZ {
+							logrus.Warnf("Registry value type mismatch - Expected: expand_string (EXPAND_SZ), Got: %d", valType)
+						}
 					}
 				case "dword":
 					var dwordVal uint64
-					dwordVal, _, err = k.GetIntegerValue(valueConfig.Name)
+					dwordVal, valType, err = k.GetIntegerValue(valueConfig.Name)
 					if err == nil {
 						val = uint32(dwordVal)
-						valType = registry.DWORD
+						// 验证读取的类型是否匹配
+						if valType != registry.DWORD {
+							logrus.Warnf("Registry value type mismatch - Expected: dword (DWORD), Got: %d", valType)
+						}
 					}
 				case "qword":
-					// 通用GetValue，然后转换
-					rawVal, rawType, rawErr := k.GetValue(valueConfig.Name, nil)
-					if rawErr == nil && rawType == registry.QWORD {
-						if qwordVal, convErr := convertToUint64(rawVal); convErr == nil {
-							val = qwordVal
-							valType = registry.QWORD
-							err = nil
-						} else {
-							err = convErr
+					var qwordVal uint64
+					qwordVal, valType, err = k.GetIntegerValue(valueConfig.Name)
+					if err == nil {
+						val = qwordVal
+						// 验证读取的类型是否匹配
+						if valType != registry.QWORD {
+							logrus.Warnf("Registry value type mismatch - Expected: qword (QWORD), Got: %d", valType)
 						}
-					} else {
-						err = rawErr
 					}
 				case "binary":
 					var binVal []byte
-					binVal, _, err = k.GetBinaryValue(valueConfig.Name)
+					binVal, valType, err = k.GetBinaryValue(valueConfig.Name)
 					if err == nil {
 						val = binVal
-						valType = registry.BINARY
+						// 验证读取的类型是否匹配
+						if valType != registry.BINARY {
+							logrus.Warnf("Registry value type mismatch - Expected: binary (BINARY), Got: %d", valType)
+						}
 					}
 				case "multi_string":
 					var multiVal []string
-					multiVal, _, err = k.GetStringsValue(valueConfig.Name)
+					multiVal, valType, err = k.GetStringsValue(valueConfig.Name)
 					if err == nil {
 						val = multiVal
-						valType = registry.MULTI_SZ
+						// 验证读取的类型是否匹配
+						if valType != registry.MULTI_SZ {
+							logrus.Warnf("Registry value type mismatch - Expected: multi_string (MULTI_SZ), Got: %d", valType)
+						}
 					}
 				default:
-					// 对于未知类型，使用通用GetValue
+					// 对于未知类型，使用通用GetValue，但记录警告
+					logrus.Warnf("Unknown registry value type: %s, using generic GetValue", valueConfig.Type)
 					val, valType, err = k.GetValue(valueConfig.Name, nil)
+				}
+
+				// 如果读取成功，记录详细的类型信息
+				if err == nil {
+					logrus.Debugf("Registry value read - Name: %s, Type: %s, ValType: %d, Value: %v (%T)",
+						valueConfig.Name, valueConfig.Type, valType, val, val)
 				}
 
 				if err != nil {
