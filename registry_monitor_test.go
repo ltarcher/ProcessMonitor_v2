@@ -228,32 +228,68 @@ func TestMonitorRegistry(t *testing.T) {
 	// 等待监控启动
 	time.Sleep(500 * time.Millisecond)
 
-	// 修改注册表值
-	err := key.SetStringValue("testValue", "modified")
+	// 验证初始值设置是否成功
+	initialVal, _, err := key.GetStringValue("testValue")
 	if err != nil {
+		t.Fatalf("failed to get initial value: %v", err)
+	}
+	logrus.Debugf("Initial value verification: %s", initialVal)
+	if initialVal != initialValue {
+		t.Fatalf("initial value not set correctly, got %q want %q", initialVal, initialValue)
+	}
+
+	// 修改注册表值
+	modifiedValue := "modified"
+	logrus.Debugf("Modifying value to: %s", modifiedValue)
+	if err := key.SetStringValue("testValue", modifiedValue); err != nil {
 		t.Fatalf("failed to modify test value: %v", err)
 	}
 
+	// 验证值是否被成功修改
+	modifiedVal, _, err := key.GetStringValue("testValue")
+	if err != nil {
+		t.Fatalf("failed to get modified value: %v", err)
+	}
+	logrus.Debugf("Modified value verification: %s", modifiedVal)
+	if modifiedVal != modifiedValue {
+		t.Fatalf("value not modified correctly, got %q want %q", modifiedVal, modifiedValue)
+	}
+
 	// 等待监控检测到变化并恢复值
-	time.Sleep(10 * time.Second)
+	logrus.Debug("Waiting for monitor to detect and restore the value...")
+	time.Sleep(2 * time.Second)
+
+	// 检查中间状态
+	midVal, _, err := key.GetStringValue("testValue")
+	if err != nil {
+		t.Fatalf("failed to get intermediate value: %v", err)
+	}
+	logrus.Debugf("Intermediate value check: %s", midVal)
+
+	// 继续等待完全恢复
+	time.Sleep(8 * time.Second)
 
 	// 停止监控
+	logrus.Debug("Stopping monitor...")
 	cancel()
 	wg.Wait()
 
-	// 验证值是否被恢复为期望值，最多重试3次
-	for i := 0; i < 3; i++ {
-		val, _, err := key.GetStringValue("testValue")
-		if err != nil {
-			t.Fatalf("failed to get test value: %v", err)
-		}
-		if val == "initial" {
-			break // 值已恢复
-		}
-		if i == 2 {
-			t.Errorf("value not restored to expected, got %q, want %q", val, "initial")
-		}
-		time.Sleep(1 * time.Second)
+	// 验证最终值
+	finalVal, _, err := key.GetStringValue("testValue")
+	if err != nil {
+		t.Fatalf("failed to get final value: %v", err)
+	}
+	logrus.Debugf("Final value verification: %s", finalVal)
+
+	if finalVal != initialValue {
+		t.Errorf("value not restored to expected, got %q want %q", finalVal, initialValue)
+		// 打印更多诊断信息
+		logrus.WithFields(logrus.Fields{
+			"initial_value":  initialValue,
+			"modified_value": modifiedValue,
+			"final_value":    finalVal,
+			"config":         config,
+		}).Error("Value restoration failed")
 	}
 }
 
