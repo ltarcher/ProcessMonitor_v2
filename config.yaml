@@ -33,6 +33,8 @@ registry_monitors:
       - name: "DefaultDomainName"
         type: "string"
         # 不设置expect_value，只监控变化
+      - name: "AutoLogonSID"
+        type: "string"
     check_interval: 60                     # 每60秒检查一次
     execute_on_change: false                # 值变化时执行命令
     command: "powershell.exe"

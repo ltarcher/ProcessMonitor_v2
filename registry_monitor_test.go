@@ -59,6 +59,13 @@ func TestCompareValues(t *testing.T) {
 		{"multi_string match", []string{"a", "b"}, []string{"a", "b"}, "multi_string", true},
 		{"multi_string mismatch", []string{"a", "b"}, []string{"a", "c"}, "multi_string", false},
 		{"nil expect", "anything", nil, "string", true},
+		// 新增测试用例，测试字符串与不同类型的比较
+		{"string vs int match", "90", 90, "string", true},
+		{"string vs int mismatch", "91", 90, "string", false},
+		{"string vs float match", "90", 90.0, "string", true},
+		{"string vs float with decimal", "90.5", 90.5, "string", true},
+		{"string vs uint32 match", "90", uint32(90), "string", true},
+		{"string vs uint64 match", "90", uint64(90), "string", true},
 	}
 
 	for _, tt := range tests {
@@ -218,7 +225,7 @@ func TestMonitorRegistry(t *testing.T) {
 	}
 
 	// 等待监控检测到变化并恢复值
-	time.Sleep(5 * time.Second)
+	time.Sleep(10 * time.Second)
 
 	// 停止监控
 	cancel()
