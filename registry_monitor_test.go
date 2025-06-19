@@ -191,14 +191,27 @@ func TestMonitorRegistry(t *testing.T) {
 	// 设置初始值
 	keyPath := "SOFTWARE\\TestRegistryMonitor" // 使用与测试键一致的路径
 	rootKey := "HKCU"                          // 使用与代码一致的格式
+	initialValue := "initial"
 
 	// 设置初始值
-	if err := key.SetStringValue("testValue", "initial"); err != nil {
+	logrus.Debugf("Setting initial registry value to: %s", initialValue)
+	if err := key.SetStringValue("testValue", initialValue); err != nil {
 		t.Fatalf("failed to set initial value: %v", err)
 	}
 
+	// 验证初始值设置成功
+	var actualValue string
+	var err error
+	actualValue, _, err = key.GetStringValue("testValue")
+	if err != nil {
+		t.Fatalf("failed to read initial value: %v", err)
+	}
+	logrus.Debugf("Initial registry value read back: %s", actualValue)
+	if actualValue != initialValue {
+		t.Fatalf("initial value not set correctly, got %q want %q", actualValue, initialValue)
+	}
+
 	// 准备测试配置
-	initialValue := "initial"
 	config := RegistryMonitor{
 		Name:          "testMonitor",
 		RootKey:       rootKey,
