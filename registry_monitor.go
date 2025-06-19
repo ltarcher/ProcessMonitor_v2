@@ -102,25 +102,43 @@ func compareValues(actual interface{}, expect interface{}, valueType string) boo
 	// 根据值类型进行比较
 	switch strings.ToLower(valueType) {
 	case "string", "expand_string":
-		// 获取实际值的字符串表示
-		actualStr := fmt.Sprintf("%v", actual)
-		var expectStr string
+		// 对于字符串类型，确保两边都是字符串类型再比较
+		var actualStr, expectStr string
 
-		// 根据期望值的类型进行智能转换
-		switch e := expect.(type) {
-		case int, int8, int16, int32, int64:
-			expectStr = fmt.Sprintf("%d", e)
-		case uint, uint8, uint16, uint32, uint64:
-			expectStr = fmt.Sprintf("%d", e)
+		// 处理实际值
+		switch a := actual.(type) {
+		case string:
+			actualStr = a
+		case []byte:
+			actualStr = string(a)
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			// 如果是数字类型，转换为字符串
+			actualStr = fmt.Sprintf("%d", a)
 		case float32, float64:
 			// 对于浮点数，保留小数部分
-			expectStr = fmt.Sprintf("%v", e)
+			actualStr = fmt.Sprintf("%v", a)
+		default:
+			// 其他类型，使用通用格式化
+			actualStr = fmt.Sprintf("%v", a)
+			logrus.Warnf("Unexpected actual value type for string comparison: %T", a)
+		}
+
+		// 处理期望值
+		switch e := expect.(type) {
 		case string:
 			expectStr = e
 		case []byte:
 			expectStr = string(e)
-		default:
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			// 如果是数字类型，转换为字符串
+			expectStr = fmt.Sprintf("%d", e)
+		case float32, float64:
+			// 对于浮点数，保留小数部分
 			expectStr = fmt.Sprintf("%v", e)
+		default:
+			// 其他类型，使用通用格式化
+			expectStr = fmt.Sprintf("%v", e)
+			logrus.Warnf("Unexpected expected value type for string comparison: %T", e)
 		}
 
 		// 增强日志输出
@@ -497,7 +515,66 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 
 		// 读取值和类型
 		logrus.Debugf("Reading registry value: %s\\%s\\%s", config.RootKey, config.Path, valueConfig.Name)
-		val, valType, err := k.GetValue(valueConfig.Name, nil)
+
+		// 根据配置的类型使用特定的读取方法，而不是通用的GetValue
+		var val interface{}
+		var valType uint32
+
+		switch strings.ToLower(valueConfig.Type) {
+		case "string":
+			var strVal string
+			strVal, _, err = k.GetStringValue(valueConfig.Name)
+			if err == nil {
+				val = strVal
+				valType = registry.SZ
+			}
+		case "expand_string":
+			var strVal string
+			strVal, _, err = k.GetStringValue(valueConfig.Name)
+			if err == nil {
+				val = strVal
+				valType = registry.EXPAND_SZ
+			}
+		case "dword":
+			var dwordVal uint64
+			dwordVal, _, err = k.GetIntegerValue(valueConfig.Name)
+			if err == nil {
+				val = uint32(dwordVal)
+				valType = registry.DWORD
+			}
+		case "qword":
+			// 通用GetValue，然后转换
+			rawVal, rawType, rawErr := k.GetValue(valueConfig.Name, nil)
+			if rawErr == nil && rawType == registry.QWORD {
+				if qwordVal, convErr := convertToUint64(rawVal); convErr == nil {
+					val = qwordVal
+					valType = registry.QWORD
+					err = nil
+				} else {
+					err = convErr
+				}
+			} else {
+				err = rawErr
+			}
+		case "binary":
+			var binVal []byte
+			binVal, _, err = k.GetBinaryValue(valueConfig.Name)
+			if err == nil {
+				val = binVal
+				valType = registry.BINARY
+			}
+		case "multi_string":
+			var multiVal []string
+			multiVal, _, err = k.GetStringsValue(valueConfig.Name)
+			if err == nil {
+				val = multiVal
+				valType = registry.MULTI_SZ
+			}
+		default:
+			// 对于未知类型，使用通用GetValue
+			val, valType, err = k.GetValue(valueConfig.Name, nil)
+		}
+
 		if err != nil {
 			// 如果值不存在且有期望值，则设置期望值
 			if err == registry.ErrNotExist && valueConfig.ExpectValue != nil {
@@ -589,7 +666,66 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 
 				// 读取值和类型
 				logrus.Debugf("Attempting to read registry value %s with expected type %s", valueConfig.Name, valueConfig.Type)
-				val, valType, err := k.GetValue(valueConfig.Name, nil)
+
+				// 根据配置的类型使用特定的读取方法
+				var val interface{}
+				var valType uint32
+
+				switch strings.ToLower(valueConfig.Type) {
+				case "string":
+					var strVal string
+					strVal, _, err = k.GetStringValue(valueConfig.Name)
+					if err == nil {
+						val = strVal
+						valType = registry.SZ
+					}
+				case "expand_string":
+					var strVal string
+					strVal, _, err = k.GetStringValue(valueConfig.Name)
+					if err == nil {
+						val = strVal
+						valType = registry.EXPAND_SZ
+					}
+				case "dword":
+					var dwordVal uint64
+					dwordVal, _, err = k.GetIntegerValue(valueConfig.Name)
+					if err == nil {
+						val = uint32(dwordVal)
+						valType = registry.DWORD
+					}
+				case "qword":
+					// 通用GetValue，然后转换
+					rawVal, rawType, rawErr := k.GetValue(valueConfig.Name, nil)
+					if rawErr == nil && rawType == registry.QWORD {
+						if qwordVal, convErr := convertToUint64(rawVal); convErr == nil {
+							val = qwordVal
+							valType = registry.QWORD
+							err = nil
+						} else {
+							err = convErr
+						}
+					} else {
+						err = rawErr
+					}
+				case "binary":
+					var binVal []byte
+					binVal, _, err = k.GetBinaryValue(valueConfig.Name)
+					if err == nil {
+						val = binVal
+						valType = registry.BINARY
+					}
+				case "multi_string":
+					var multiVal []string
+					multiVal, _, err = k.GetStringsValue(valueConfig.Name)
+					if err == nil {
+						val = multiVal
+						valType = registry.MULTI_SZ
+					}
+				default:
+					// 对于未知类型，使用通用GetValue
+					val, valType, err = k.GetValue(valueConfig.Name, nil)
+				}
+
 				if err != nil {
 					logrus.Debugf("Failed to read registry value %s: %v", valueConfig.Name, err)
 					// 如果值不存在且有期望值，则设置期望值
