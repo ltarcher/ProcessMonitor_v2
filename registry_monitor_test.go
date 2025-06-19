@@ -181,8 +181,8 @@ func TestSetRegistryValue(t *testing.T) {
 }
 
 func TestMonitorRegistry(t *testing.T) {
-	// 设置日志级别为Fatal，避免测试输出干扰
-	logrus.SetLevel(logrus.FatalLevel)
+	// 设置日志级别为Debug，以便查看详细日志
+	logrus.SetLevel(logrus.DebugLevel)
 
 	// 创建测试键
 	key, cleanup := createTestKey(t)
