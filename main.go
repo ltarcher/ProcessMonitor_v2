@@ -555,6 +555,7 @@ func main() {
 
 	// Parse command line flags
 	configFile := flag.String("config", "config.yaml", "path to config file")
+	logrus.Infof("Loading config from: %s", *configFile)
 	createWatchdog := flag.Bool("create-watchdog", false, "create watchdog script for self-monitoring")
 	showVersion := flag.Bool("v", false, "show version information")
 	flag.Parse()
