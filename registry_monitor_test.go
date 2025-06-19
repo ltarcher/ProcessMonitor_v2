@@ -192,20 +192,30 @@ func TestMonitorRegistry(t *testing.T) {
 	keyPath := "SOFTWARE\\TestRegistryMonitor" // 使用与测试键一致的路径
 	rootKey := "HKCU"                          // 使用与代码一致的格式
 
+	// 设置初始值
+	if err := key.SetStringValue("testValue", "initial"); err != nil {
+		t.Fatalf("failed to set initial value: %v", err)
+	}
+
 	// 准备测试配置
+	initialValue := "initial"
 	config := RegistryMonitor{
 		Name:          "testMonitor",
 		RootKey:       rootKey,
-		Path:          strings.TrimPrefix(keyPath, "SOFTWARE\\"),
+		Path:          keyPath,
 		CheckInterval: 1,
 		Values: []RegistryValueConfig{
 			{
 				Name:        "testValue",
 				Type:        "string",
-				ExpectValue: "initial",
+				ExpectValue: initialValue,
 			},
 		},
 	}
+
+	// 打印调试信息
+	logrus.Debugf("Monitor configuration: %+v", config)
+	logrus.Debugf("Initial value set to: %s", initialValue)
 
 	// 设置上下文和等待组
 	ctx, cancel := context.WithCancel(context.Background())
