@@ -413,6 +413,11 @@ func setRegistryValue(k registry.Key, name string, valueType string, value inter
 	logrus.Debugf("Setting registry value - Name: %s, Type: %s, Value: %v (%T)",
 		name, valueType, value, value)
 
+	// 检查nil值
+	if value == nil {
+		return fmt.Errorf("cannot set registry value to nil")
+	}
+
 	var err error
 
 	switch strings.ToLower(valueType) {
@@ -429,8 +434,7 @@ func setRegistryValue(k registry.Key, name string, valueType string, value inter
 		case float32, float64:
 			strValue = fmt.Sprintf("%v", v)
 		default:
-			strValue = fmt.Sprintf("%v", v)
-			logrus.Warnf("Converting non-standard type %T to string for registry value", v)
+			return fmt.Errorf("cannot convert type %T to string for registry value", value)
 		}
 		err = k.SetStringValue(name, strValue)
 
