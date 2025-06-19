@@ -712,6 +712,25 @@ func MonitorRegistry(config RegistryMonitor, ctx context.Context, wg *sync.WaitG
 				valueConfig.Name, expectedType, valType, val)
 		}
 
+		// 新增：如果有期望值，检查当前值是否与期望值匹配
+		if valueConfig.ExpectValue != nil {
+			// 使用compareValues函数比较当前值与期望值
+			if !compareValues(val, valueConfig.ExpectValue, valueConfig.Type) {
+				logrus.Warnf("Initial value for %s does not match expected. Got: %v, Expected: %v",
+					valueConfig.Name, val, valueConfig.ExpectValue)
+
+				// 设置为期望值
+				if setErr := setRegistryValue(k, valueConfig.Name, valueConfig.Type, valueConfig.ExpectValue); setErr != nil {
+					logrus.Errorf("Failed to set expected value for %s: %v", valueConfig.Name, setErr)
+					continue
+				}
+
+				// 使用期望值而不是读取的值
+				val = valueConfig.ExpectValue
+				logrus.Infof("Successfully corrected value for %s to match expected value", valueConfig.Name)
+			}
+		}
+
 		// 根据类型处理值
 		switch strings.ToLower(valueConfig.Type) {
 		case "string", "expand_string":
